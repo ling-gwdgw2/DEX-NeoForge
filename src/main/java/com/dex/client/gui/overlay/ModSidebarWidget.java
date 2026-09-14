@@ -92,7 +92,10 @@ public class ModSidebarWidget {
             List<Component> tooltips = new ArrayList<>();
             tooltips.add(Component.literal(hoveredMod.getDisplayName()).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
             
-            if (!ItemCatalogManager.ALL_MODS_ID.equals(hoveredMod.getModId())) {
+            if (ItemCatalogManager.BOOKMARKS_MOD_ID.equals(hoveredMod.getModId())) {
+                tooltips.add(Component.literal("Pinned & favorite items").withStyle(ChatFormatting.GOLD));
+                tooltips.add(Component.literal("Press 'A' on any item to pin").withStyle(ChatFormatting.GRAY));
+            } else if (!ItemCatalogManager.ALL_MODS_ID.equals(hoveredMod.getModId())) {
                 tooltips.add(Component.literal("@" + hoveredMod.getModId()).withStyle(ChatFormatting.DARK_AQUA));
                 tooltips.add(Component.literal(hoveredMod.getItemCount() + " items").withStyle(ChatFormatting.GRAY));
             } else {

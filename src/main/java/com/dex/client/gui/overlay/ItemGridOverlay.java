@@ -124,6 +124,11 @@ public class ItemGridOverlay {
                     graphics.renderItem(stack, slotX, slotY);
                     graphics.renderItemDecorations(font, stack, slotX, slotY);
 
+                    // If item is pinned/bookmarked, draw a gold badge in the top-right corner
+                    if (com.dex.client.bookmark.BookmarkManager.getInstance().isBookmarked(stack)) {
+                        graphics.fill(slotX + 12, slotY, slotX + 16, slotY + 4, 0xFFFFCC00);
+                    }
+
                     // Check hover
                     if (mouseX >= slotX && mouseX < slotX + 16 && mouseY >= slotY && mouseY < slotY + 16) {
                         hoveredStack = stack;
@@ -154,7 +159,7 @@ public class ItemGridOverlay {
             tooltips.add(Component.literal("Origin: ").withStyle(ChatFormatting.DARK_GRAY)
                     .append(Component.literal(modDisplay).withStyle(ChatFormatting.BLUE, ChatFormatting.ITALIC)));
 
-            // Add Recipe/Usage hints
+            // Add Recipe/Usage/Pin hints
             boolean hasRecipes = RecipeIndexManager.getInstance().hasRecipes(hoveredStack);
             boolean hasUsages = RecipeIndexManager.getInstance().hasUsages(hoveredStack);
 
@@ -163,7 +168,9 @@ public class ItemGridOverlay {
                         .append(Component.literal("R").withStyle(ChatFormatting.YELLOW))
                         .append(Component.literal(": Recipes | ").withStyle(ChatFormatting.GRAY))
                         .append(Component.literal("U").withStyle(ChatFormatting.YELLOW))
-                        .append(Component.literal(": Usages ]").withStyle(ChatFormatting.GRAY));
+                        .append(Component.literal(": Usages | ").withStyle(ChatFormatting.GRAY))
+                        .append(Component.literal("A").withStyle(ChatFormatting.YELLOW))
+                        .append(Component.literal(": Pin ]").withStyle(ChatFormatting.GRAY));
                 tooltips.add(hint);
             }
 
@@ -254,13 +261,24 @@ public class ItemGridOverlay {
             return true;
         }
 
-        // Check R (keyCode 82) or U (keyCode 85) while hovering over item
+        // Check R (keyCode 82), U (keyCode 85), or A (keyCode 65) while hovering over item
         if (!hoveredStack.isEmpty()) {
             if (keyCode == 82) { // R
                 RecipeViewerScreen.openRecipes(hoveredStack);
                 return true;
             } else if (keyCode == 85) { // U
                 RecipeViewerScreen.openUsages(hoveredStack);
+                return true;
+            } else if (keyCode == 65) { // A: Toggle Bookmark
+                boolean added = com.dex.client.bookmark.BookmarkManager.getInstance().toggleBookmark(hoveredStack);
+                Minecraft mc = Minecraft.getInstance();
+                if (mc.player != null) {
+                    mc.player.displayClientMessage(
+                            Component.literal("DEX: " + (added ? "Pinned " : "Unpinned ") + hoveredStack.getHoverName().getString() + " to Bookmarks!")
+                                    .withStyle(added ? ChatFormatting.GOLD : ChatFormatting.GRAY),
+                            true
+                    );
+                }
                 return true;
             }
         }

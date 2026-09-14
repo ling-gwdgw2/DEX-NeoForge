@@ -2,17 +2,30 @@ package com.dex.client;
 
 import com.dex.DEXMod;
 import com.dex.catalog.ItemCatalogManager;
+import com.dex.catalog.ModInfo;
+import com.dex.client.bookmark.BookmarkManager;
 import com.dex.client.gui.overlay.ItemGridOverlay;
 import com.dex.client.gui.overlay.ModSidebarWidget;
+import com.dex.client.gui.recipe.RecipeViewerScreen;
 import com.dex.plugin.DexPluginManager;
 import com.dex.recipe.RecipeIndexManager;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
-import net.neoforged.neoforge.client.event.ContainerScreenEvent;
 import net.neoforged.neoforge.client.event.RecipesUpdatedEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
+import net.neoforged.neoforge.event.entity.player.ItemTooltipEvent;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.List;
 
 public class DEXClientEvents {
     private static final ModSidebarWidget modSidebar = new ModSidebarWidget();
@@ -24,6 +37,49 @@ public class DEXClientEvents {
     private static int lastScreenWidth = -1;
     private static int lastScreenHeight = -1;
 
+    // Reflection cache for reading hovered slot from AbstractContainerScreen safely
+    private static Method getSlotUnderMouseMethod = null;
+    private static Field hoveredSlotField = null;
+    private static boolean reflectionResolved = false;
+
+    private static void resolveSlotReflection() {
+        if (reflectionResolved) return;
+        reflectionResolved = true;
+
+        try {
+            for (Method m : AbstractContainerScreen.class.getDeclaredMethods()) {
+                if (Slot.class.isAssignableFrom(m.getReturnType()) && m.getParameterCount() == 0) {
+                    m.setAccessible(true);
+                    getSlotUnderMouseMethod = m;
+                    break;
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            for (Field f : AbstractContainerScreen.class.getDeclaredFields()) {
+                if (Slot.class.isAssignableFrom(f.getType())) {
+                    f.setAccessible(true);
+                    hoveredSlotField = f;
+                    break;
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    public static Slot getHoveredSlot(AbstractContainerScreen<?> container) {
+        resolveSlotReflection();
+        try {
+            if (getSlotUnderMouseMethod != null) {
+                return (Slot) getSlotUnderMouseMethod.invoke(container);
+            }
+            if (hoveredSlotField != null) {
+                return (Slot) hoveredSlotField.get(container);
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
     @SubscribeEvent
     public static void onRecipesUpdated(RecipesUpdatedEvent event) {
         Minecraft mc = Minecraft.getInstance();
@@ -34,6 +90,7 @@ public class DEXClientEvents {
             com.dex.recipe.trading.VillagerTradeIndexManager.getInstance().reindex();
             com.dex.recipe.drops.MobDropIndexManager.getInstance().reindex();
             DexPluginManager.getInstance().initializeAll(mc.level);
+            BookmarkManager.getInstance().ensureLoaded();
         }
     }
 
@@ -47,6 +104,7 @@ public class DEXClientEvents {
             com.dex.recipe.trading.VillagerTradeIndexManager.getInstance().reindex();
             com.dex.recipe.drops.MobDropIndexManager.getInstance().reindex();
             DexPluginManager.getInstance().initializeAll(mc.level);
+            BookmarkManager.getInstance().ensureLoaded();
         }
     }
 
@@ -176,10 +234,39 @@ public class DEXClientEvents {
             return;
         }
 
-        if (!overlayActive) return;
-
-        if (itemGrid.keyPressed(event.getKeyCode(), event.getScanCode(), event.getModifiers())) {
+        // 1. Check if search box or item grid consumes the key press
+        if (overlayActive && itemGrid.keyPressed(event.getKeyCode(), event.getScanCode(), event.getModifiers())) {
             event.setCanceled(true);
+            return;
+        }
+
+        // 2. Check hovered container/inventory slots for R (Recipes), U (Usages), and A (Bookmark)
+        if (event.getScreen() instanceof AbstractContainerScreen<?> container) {
+            Slot slot = getHoveredSlot(container);
+            if (slot != null && slot.hasItem()) {
+                ItemStack stack = slot.getItem();
+                if (event.getKeyCode() == 82) { // 'R' key
+                    RecipeViewerScreen.openRecipes(stack);
+                    event.setCanceled(true);
+                    return;
+                } else if (event.getKeyCode() == 85) { // 'U' key
+                    RecipeViewerScreen.openUsages(stack);
+                    event.setCanceled(true);
+                    return;
+                } else if (event.getKeyCode() == 65) { // 'A' key: Bookmark
+                    boolean added = BookmarkManager.getInstance().toggleBookmark(stack);
+                    Minecraft mc = Minecraft.getInstance();
+                    if (mc.player != null) {
+                        mc.player.displayClientMessage(
+                                Component.literal("DEX: " + (added ? "Pinned " : "Unpinned ") + stack.getHoverName().getString() + " to Bookmarks!")
+                                        .withStyle(added ? ChatFormatting.GOLD : ChatFormatting.GRAY),
+                                true
+                        );
+                    }
+                    event.setCanceled(true);
+                    return;
+                }
+            }
         }
     }
 
@@ -189,6 +276,37 @@ public class DEXClientEvents {
 
         if (itemGrid.charTyped(event.getCodePoint(), event.getModifiers())) {
             event.setCanceled(true);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onItemTooltip(ItemTooltipEvent event) {
+        ItemStack stack = event.getItemStack();
+        if (stack.isEmpty()) return;
+
+        List<Component> tooltip = event.getToolTip();
+        ResourceLocation key = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        String namespace = key.getNamespace();
+        ModInfo modInfo = ItemCatalogManager.getInstance().getModInfo(namespace);
+        String modDisplay = modInfo != null ? modInfo.getDisplayName() : namespace;
+
+        // Mod origin indicator
+        tooltip.add(Component.empty());
+        tooltip.add(Component.literal("Origin: ").withStyle(ChatFormatting.DARK_GRAY)
+                .append(Component.literal(modDisplay).withStyle(ChatFormatting.BLUE, ChatFormatting.ITALIC)));
+
+        // Recipe and usage key hints
+        boolean hasRecipes = RecipeIndexManager.getInstance().hasRecipes(stack);
+        boolean hasUsages = RecipeIndexManager.getInstance().hasUsages(stack);
+        if (hasRecipes || hasUsages) {
+            Component hint = Component.literal("[ ")
+                    .append(Component.literal("R").withStyle(ChatFormatting.YELLOW))
+                    .append(Component.literal(": Recipes | ").withStyle(ChatFormatting.GRAY))
+                    .append(Component.literal("U").withStyle(ChatFormatting.YELLOW))
+                    .append(Component.literal(": Usages | ").withStyle(ChatFormatting.GRAY))
+                    .append(Component.literal("A").withStyle(ChatFormatting.YELLOW))
+                    .append(Component.literal(": Pin ]").withStyle(ChatFormatting.GRAY));
+            tooltip.add(hint);
         }
     }
 }

@@ -130,6 +130,9 @@ public class DexPluginManager {
             DEXMod.LOGGER.error("Failed to run JEI compatibility bridge: {}", t.getMessage(), t);
         }
 
+        // 5. Build Reverse Item-to-Recipe Index for all custom categories
+        registries.indexCustomRecipes();
+
         initialized = true;
         DEXMod.LOGGER.info("DEX Plugins initialized: {} categories registered.", registries.getAllCategories().size());
     }

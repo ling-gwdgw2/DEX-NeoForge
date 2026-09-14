@@ -81,14 +81,17 @@ c:/Users/vivo9/Desktop/Minecraft my mod/dex-neoforge-1.21.1/src/main/java/com/de
 ├── client/                                   # Client-side lifecycle & UI
 │   ├── DEXClient.java                        # Client registration setup
 │   ├── DEXClientEvents.java                  # Event bus hooks (screen render, input, bounds)
+│   ├── bookmark/
+│   │   └── BookmarkManager.java              # Pinned favorites manager & JSON persistence
 │   └── gui/
 │       ├── overlay/                          # In-game container side overlays
 │       │   ├── ModSidebarWidget.java         # Mod origin vertical selector
 │       │   └── ItemGridOverlay.java          # Paginated item grid & search input box
 │       └── recipe/                           # Recipe viewing screens
-│           └── RecipeViewerScreen.java       # Multi-tab recipe popup & crafting tree GUI
+│           └── RecipeViewerScreen.java       # Multi-tab recipe popup, tree & history GUI
 ├── api/                                      # Public API for third-party mods
 │   ├── DexPlugin.java                        # @DexPlugin class-level annotation
+│   ├── DexRecipeSlot.java                    # Relative slot position & items model
 │   ├── IDexPlugin.java                       # Main plugin contract
 │   ├── IDexRecipeCategory.java               # Custom recipe category / machine GUI spec
 │   ├── IDexCategoryRegistry.java             # Category registration interface

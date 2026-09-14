@@ -80,15 +80,18 @@ c:/Users/vivo9/Desktop/Minecraft my mod/dex-neoforge-1.21.1/src/main/java/com/de
 │   └── drops/                                # Indexer แหล่งดรอปมอนสเตอร์ (Mob Drops)
 ├── client/                                   # การทำงานฝั่ง Client และ UI
 │   ├── DEXClient.java                        # Client Registration
-│   ├── DEXClientEvents.java                  # Event Hooks (Screen, Mouse, Keys, Bounds)
+│   ├── DEXClientEvents.java                  # Event Hooks (Screen, Mouse, Keys, Bounds, Slot Shortcuts)
+│   ├── bookmark/
+│   │   └── BookmarkManager.java              # ระบบบุ๊กมาร์ก/ปักหมุดไอเทม บันทึก JSON อัตโนมัติ
 │   └── gui/
 │       ├── overlay/                          # หน้าต่าง Overlay ด้านข้าง Inventory
-│       │   ├── ModSidebarWidget.java         # แถบเลือก Mod ต้นทาง
-│       │   └── ItemGridOverlay.java          # ตารางไอเทมและ Search Box
+│       │   ├── ModSidebarWidget.java         # แถบเลือก Mod ต้นทาง และแท็บ Bookmark ★
+│       │   └── ItemGridOverlay.java          # ตารางไอเทม ตราดาวทอง และ Search Box
 │       └── recipe/                           # หน้าต่าง Popup สูตรคราฟต์
-│           └── RecipeViewerScreen.java       # Multi-Tab Recipe & Usage Screen
+│           └── RecipeViewerScreen.java       # Multi-Tab Recipe, Dynamic Machine Tabs & History GUI
 ├── api/                                      # Public API ให้ม็อดอื่นต่อยอด
 │   ├── DexPlugin.java                        # @DexPlugin Annotation
+│   ├── DexRecipeSlot.java                    # โมเดลพิกัดสล็อตและไอเทมในสูตรคราฟต์
 │   ├── IDexPlugin.java                       # Interface หลักของ Plugin
 │   ├── IDexRecipeCategory.java               # ข้อกำหนดหมวดหมู่สูตร/เครื่องจักร
 │   ├── IDexCategoryRegistry.java             # รีจิสทรีสำหรับหมวดหมู่
@@ -118,31 +121,46 @@ c:/Users/vivo9/Desktop/Minecraft my mod/dex-neoforge-1.21.1/src/main/java/com/de
   - ตอนเริ่มเกม ระบบจะดึงไอเทมจาก `BuiltInRegistries.ITEM` และแปลงเป็น `ItemSearchEntry` แคชไว้ล่วงหน้า
   - แคชล่วงหน้า: `lowerName`, `lowerId`, `lowerModId`, `lowerModName`, และ `lowerTags`
   - การพิมพ์ค้นหาขณะเล่นเกมจะทำงานกับ String / Set ใน RAM เท่านั้น จึงไม่มีการเรียก `stack.getHoverName()` ซ้ำ ทำให้เฟรมเรตนิ่ง 60-144 FPS
-* **Multi-Token Query Engine:**
+* **Multi-Token Query & Relevance Scoring Engine:**
   - รองรับการค้นหาแบบผสมคำด้วย Space (AND Logic)
   - `@mod` : ค้นหาตาม Mod ID หรือ Display Name (เช่น `@create`, `@minecraft`)
   - `#tag` : ค้นหาตาม Item Tag (เช่น `#c:ingots`, `#ores`)
+  - `$tooltip` : ค้นหาลึกถึงข้อความคำอธิบาย Tooltip (เช่น `$energy`, `$durability`)
   - `-neg` : Negative Exclusion คัดกรองสิ่งที่ไม่ต้องการออก (เช่น `iron -ingot`)
   - `"..."` : Exact Phrase (เช่น `"raw iron"`)
+  - **Relevance Scoring:** จัดเรียงผลลัพธ์ตามระดับความตรงประเด็น (Exact Name +10,000 > Prefix +5,000 > Word Boundary +2,500 > Contains +1,000 > ID/Tag/Tooltip +400) เพื่อให้ไอเทมหลัก (เช่น `Iron Ingot`) ปรากฏก่อนเครื่องมือเสมอ
 
-### 3.2 Recipe Indexing & Decomposition Engine
+### 3.2 Recipe Indexing, Custom Categories & Decomposition Engine
 * **ไฟล์หลัก:** [`RecipeIndexManager.java`](file:///c:/Users/vivo9/Desktop/Minecraft%20my%20mod/dex-neoforge-1.21.1/src/main/java/com/dex/recipe/RecipeIndexManager.java) & [`CraftingTreeCalculator.java`](file:///c:/Users/vivo9/Desktop/Minecraft%20my%20mod/dex-neoforge-1.21.1/src/main/java/com/dex/recipe/tree/CraftingTreeCalculator.java)
-* **O(1) Recipe Lookup:**
+* **O(1) Recipe Lookup & Machine Integration:**
   - จัดทำ Reverse Index `Map<Item, List<RecipeHolder<?>>>`:
     - `recipesByOutput`: หาว่าไอเทมนี้คราฟต์อย่างไร (Recipes - ปุ่ม `R`)
     - `recipesByInput`: หาว่าไอเทมนี้เอาไปทำอะไรต่อได้ (Usages - ปุ่ม `U`)
+  - เชื่อมต่อกับหมวดหมู่เครื่องจักรจาก [DexRegistriesImpl](file:///c:/Users/vivo9/Desktop/Minecraft%20my%20mod/dex-neoforge-1.21.1/src/main/java/com/dex/plugin/DexRegistriesImpl.java) แสดงสูตรของม็อดเทคโนโลยี/เวทมนตร์ต่างๆ ผ่านแท็บไดนามิกอัตโนมัติ
 * **Crafting Tree Calculator (Raw Material Decomposition):**
   - แตกกิ่งแบบ Recursive ลงไปจนถึงวัตถุดิบตั้งต้น (Base Materials)
   - มีระบบ **Cycle Detection** จำกัดความลึกที่ `MAX_DEPTH = 6` และตรวจสอบ Ancestor Branch Path ป้องกัน Infinite Recursion ในสูตรแปลงวนไปมา (เช่น Iron Block <-> Iron Ingot)
   - สรุปผลรวมวัตถุดิบตั้งต้นทั้งหมด (Total Raw Materials) พร้อมปุ่มคูณจำนวน `[x1] [x4] [x16] [x64]`
 
-### 3.3 Client Overlay & Interaction Layer
-* **ไฟล์หลัก:** [`DEXClientEvents.java`](file:///c:/Users/vivo9/Desktop/Minecraft%20my%20mod/dex-neoforge-1.21.1/src/main/java/com/dex/client/DEXClientEvents.java) & [`ItemGridOverlay.java`](file:///c:/Users/vivo9/Desktop/Minecraft%20my%20mod/dex-neoforge-1.21.1/src/main/java/com/dex/client/gui/overlay/ItemGridOverlay.java)
+### 3.3 Client Overlay, Bookmarks & Interaction Layer
+* **ไฟล์หลัก:** [`DEXClientEvents.java`](file:///c:/Users/vivo9/Desktop/Minecraft%20my%20mod/dex-neoforge-1.21.1/src/main/java/com/dex/client/DEXClientEvents.java), [`ItemGridOverlay.java`](file:///c:/Users/vivo9/Desktop/Minecraft%20my%20mod/dex-neoforge-1.21.1/src/main/java/com/dex/client/gui/overlay/ItemGridOverlay.java), [`BookmarkManager.java`](file:///c:/Users/vivo9/Desktop/Minecraft%20my%20mod/dex-neoforge-1.21.1/src/main/java/com/dex/client/bookmark/BookmarkManager.java)
 * **Dynamic Right-Anchored Bounds:**
   - ดักจับ Event `ScreenEvent.Render.Post` บน `AbstractContainerScreen`
   - คำนวณขอบขวาของกล่อง/โต๊ะคราฟต์ทุกเฟรม:
     `containerRight = Math.max(container.getGuiLeft() + container.getXSize(), (screenWidth + 176) / 2) + 6;`
   - ล็อกตำแหน่งแถบ Mod Sidebar และ Item Grid ให้อยู่ทางขวาสุดของจอ **ไม่ทับซ้อนกับหน้าต่าง Inventory ของผู้เล่นเด็ดขาด**
+* **Container Slot Hotkey Hooks & Tooltip Hints:**
+  - สามารถชี้เมาส์ที่ไอเทมในตัวผู้เล่น, ในหีบ หรือในตารางสูตร แล้วกด:
+    - `R` : ดูสูตรการสร้าง (Recipes)
+    - `U` : ดูการนำไปใช้งาน (Usages)
+    - `A` : ปักหมุด / ถอนปักหมุดไอเทมที่ชื่นชอบ (Bookmark)
+  - ระบบ Tooltip แสดงแหล่งที่มาของม็อดตัวเอียงสีฟ้า (`Origin: <Mod>`) และปุ่มลัดชัดเจน
+* **Bookmark & Favorites System:**
+  - จัดเก็บรายการโปรดเป็น JSON อัตโนมัติที่ `config/dex_bookmarks.json`
+  - แท็บพิเศษ `★ Bookmarks` ด้านบนสุดของ Sidebar รวบรวมไอเทมที่ปักหมุดไว้
+  - แสดงตราดาวสีทองมุมขวาล่างของช่องไอเทมที่ปักหมุด
+* **Recipe Viewer History & Navigation:**
+  - จดจำเส้นทางการเปิดสูตรด้วย Navigation Stack สามารถกด `Backspace` หรือปุ่ม `[ ⮌ Back ]` เพื่อย้อนกลับไปสูตรก่อนหน้าได้ไม่จำกัดขั้นตอน
 * **Focus & Key Event Management:**
   - Search Box ดักจับคีย์บอร์ดโดยตรง (`keyPressed` & `charTyped`) ขณะที่โฟกัสอยู่ เพื่อป้องกันไม่ให้ปุ่ม `E` หรือ `Q` ปิดหน้าต่าง Inventory
   - กด `ESC` เพื่อ Unfocus และคลิกขวาที่ช่องค้นหาเพื่อเคลียร์ข้อความทันที

@@ -42,9 +42,10 @@ DEX supports intuitive, multi-token query evaluation using AND logic:
 
 | Prefix / Format | Description | Example |
 |---|---|---|
-| `keyword` | Matches item name or ID | `diamond`, `sword` |
+| `keyword` | Matches item name or ID (Ranked by relevance) | `diamond`, `sword` |
 | `@mod` | Filters by Mod ID or display name | `@create`, `@minecraft` |
 | `#tag` | Filters by item tag | `#c:ingots`, `#c:ores` |
+| `$text` | Filters by tooltip description / enchantment | `$sharpness`, `$speed` |
 | `-keyword` | Negative exclusion prefix | `iron -ingot` (finds iron items that aren't ingots) |
 | `"..."` | Exact quoted phrase | `"raw iron"`, `"oak planks"` |
 | *Combinations* | Combine any tokens | `@create gear -#c:plates` |
@@ -55,13 +56,16 @@ DEX supports intuitive, multi-token query evaluation using AND logic:
 
 | Key / Action | Function |
 |---|---|
-| `R` (Hovering item) | Show recipes that produce this item |
-| `U` (Hovering item) | Show recipes that consume this item (Usages) |
+| `R` (Hovering any slot or grid item) | Show recipes that produce this item |
+| `U` (Hovering any slot or grid item) | Show recipes that consume this item (Usages) |
+| `A` (Hovering any item) | Pin / Unpin item to Bookmarks (★ Bookmarks) |
+| `Backspace` (in Recipe Viewer) | Navigate back to previous recipe in history |
+| `Left / Right Arrows` | Flip pages in Recipe Viewer or Item Grid |
 | `Ctrl + O` | Toggle DEX overlay visibility (Show / Hide) |
 | `Left Click` (Search box) | Focus search box and start typing |
 | `Right Click` (Search box) | Clear search query instantly |
 | `ESC` | Release search box focus (or close screen if unfocused) |
-| `Mouse Wheel / Arrows` | Navigate grid and recipe pages |
+| `Mouse Wheel` | Scroll grid, sidebar, and recipe views |
 
 ---
 

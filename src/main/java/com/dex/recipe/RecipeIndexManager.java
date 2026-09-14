@@ -82,11 +82,20 @@ public class RecipeIndexManager {
     }
 
     public boolean hasRecipes(ItemStack stack) {
-        return !getRecipesFor(stack).isEmpty();
+        if (stack == null || stack.isEmpty()) return false;
+        return !getRecipesFor(stack).isEmpty()
+                || !com.dex.recipe.brewing.BrewingIndexManager.getInstance().getRecipesFor(stack).isEmpty()
+                || !com.dex.recipe.trading.VillagerTradeIndexManager.getInstance().getTradesSelling(stack).isEmpty()
+                || !com.dex.recipe.drops.MobDropIndexManager.getInstance().getDropsFor(stack).isEmpty()
+                || com.dex.plugin.DexPluginManager.getInstance().getRegistries().hasCustomRecipes(stack);
     }
 
     public boolean hasUsages(ItemStack stack) {
-        return !getUsagesFor(stack).isEmpty();
+        if (stack == null || stack.isEmpty()) return false;
+        return !getUsagesFor(stack).isEmpty()
+                || !com.dex.recipe.brewing.BrewingIndexManager.getInstance().getUsagesFor(stack).isEmpty()
+                || !com.dex.recipe.trading.VillagerTradeIndexManager.getInstance().getTradesBuying(stack).isEmpty()
+                || com.dex.plugin.DexPluginManager.getInstance().getRegistries().hasCustomUsages(stack);
     }
 
     public boolean isIndexed() {

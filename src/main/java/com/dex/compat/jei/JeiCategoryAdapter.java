@@ -10,6 +10,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -81,6 +82,17 @@ public class JeiCategoryAdapter<T> implements IDexRecipeCategory<T> {
             // Ignore layout errors for incompatible custom recipes
         }
         return builder.getSlots();
+    }
+
+    @Override
+    public List<com.dex.api.DexRecipeSlot> getSlots(T recipe) {
+        List<MockRecipeLayoutBuilder.CapturedSlot> rawSlots = buildSlots(recipe);
+        List<com.dex.api.DexRecipeSlot> result = new ArrayList<>();
+        for (MockRecipeLayoutBuilder.CapturedSlot raw : rawSlots) {
+            boolean isOutput = (raw.role == mezz.jei.api.recipe.RecipeIngredientRole.OUTPUT);
+            result.add(new com.dex.api.DexRecipeSlot(raw.x, raw.y, raw.itemStacks, isOutput));
+        }
+        return result;
     }
 
     @Override

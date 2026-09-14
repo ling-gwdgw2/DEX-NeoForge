@@ -1,7 +1,12 @@
 package com.dex.client.gui.recipe;
 
+import com.dex.api.DexRecipeSlot;
+import com.dex.api.IDexRecipeCategory;
 import com.dex.catalog.ItemCatalogManager;
 import com.dex.catalog.ModInfo;
+import com.dex.client.bookmark.BookmarkManager;
+import com.dex.plugin.DexPluginManager;
+import com.dex.plugin.DexRegistriesImpl;
 import com.dex.recipe.RecipeIndexManager;
 import com.dex.recipe.brewing.BrewingIndexManager;
 import com.dex.recipe.brewing.BrewingRecipeEntry;
@@ -23,6 +28,7 @@ import net.minecraft.network.protocol.game.ServerboundPlaceRecipePacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.*;
 
 import java.util.*;
@@ -33,16 +39,23 @@ public class RecipeViewerScreen extends Screen {
         USAGE
     }
 
-    public enum Category {
-        RECIPES("Recipes"),
-        BREWING("Brewing"),
-        TRADING("Trading"),
-        MOB_DROPS("Mob Drops"),
-        TREE("🌳 Tree");
+    public record HistoryEntry(ItemStack targetItem, Mode mode, String activeTabId, int recipeIndex) {}
+    private static final Deque<HistoryEntry> HISTORY = new ArrayDeque<>();
 
-        private final String label;
-        Category(String label) { this.label = label; }
-        public String getLabel() { return label; }
+    public static class CategoryTab {
+        public final String id;
+        public final String label;
+        public final ItemStack icon;
+        public final int recipeCount;
+        public final IDexRecipeCategory<?> customCategory;
+
+        public CategoryTab(String id, String label, ItemStack icon, int recipeCount, IDexRecipeCategory<?> customCategory) {
+            this.id = id;
+            this.label = label;
+            this.icon = icon;
+            this.recipeCount = recipeCount;
+            this.customCategory = customCategory;
+        }
     }
 
     private final Screen previousScreen;
@@ -53,12 +66,11 @@ public class RecipeViewerScreen extends Screen {
     private final List<BrewingRecipeEntry> brewingRecipes;
     private final List<VillagerTradeEntry> villagerTrades;
     private final List<MobDropEntry> mobDrops;
+    private final Map<IDexRecipeCategory<?>, List<DexRegistriesImpl.CustomRecipeEntry>> customCategories = new LinkedHashMap<>();
 
-    private Category activeCategory = Category.RECIPES;
-    private int currentRecipeIndex = 0;
-    private int currentBrewingIndex = 0;
-    private int currentTradeIndex = 0;
-    private int currentMobDropIndex = 0;
+    private final List<CategoryTab> tabs = new ArrayList<>();
+    private int activeTabIndex = 0;
+    private final Map<String, Integer> tabRecipeIndices = new HashMap<>();
 
     // Tree calculator multiplier
     private int treeMultiplier = 1;
@@ -82,34 +94,115 @@ public class RecipeViewerScreen extends Screen {
             this.brewingRecipes = new ArrayList<>(BrewingIndexManager.getInstance().getRecipesFor(targetItem));
             this.villagerTrades = new ArrayList<>(VillagerTradeIndexManager.getInstance().getTradesSelling(targetItem));
             this.mobDrops = new ArrayList<>(MobDropIndexManager.getInstance().getDropsFor(targetItem));
+
+            List<DexRegistriesImpl.CustomRecipeEntry> customEntries =
+                    DexPluginManager.getInstance().getRegistries().getCustomRecipesForOutput(targetItem);
+            for (DexRegistriesImpl.CustomRecipeEntry entry : customEntries) {
+                this.customCategories.computeIfAbsent(entry.category(), k -> new ArrayList<>()).add(entry);
+            }
         } else {
             this.recipes = new ArrayList<>(RecipeIndexManager.getInstance().getUsagesFor(targetItem));
             this.brewingRecipes = new ArrayList<>(BrewingIndexManager.getInstance().getUsagesFor(targetItem));
             this.villagerTrades = new ArrayList<>(VillagerTradeIndexManager.getInstance().getTradesBuying(targetItem));
             this.mobDrops = new ArrayList<>();
+
+            List<DexRegistriesImpl.CustomRecipeEntry> customEntries =
+                    DexPluginManager.getInstance().getRegistries().getCustomRecipesForInput(targetItem);
+            for (DexRegistriesImpl.CustomRecipeEntry entry : customEntries) {
+                this.customCategories.computeIfAbsent(entry.category(), k -> new ArrayList<>()).add(entry);
+            }
         }
 
-        // Set initial category to first one with content
-        if (recipes.isEmpty()) {
-            if (!brewingRecipes.isEmpty()) activeCategory = Category.BREWING;
-            else if (!villagerTrades.isEmpty()) activeCategory = Category.TRADING;
-            else if (!mobDrops.isEmpty()) activeCategory = Category.MOB_DROPS;
-            else activeCategory = Category.RECIPES;
-        }
-
+        buildTabs();
         this.cachedTree = CraftingTreeCalculator.calculateTree(targetItem, treeMultiplier);
     }
 
+    private void buildTabs() {
+        tabs.clear();
+
+        // 1. Vanilla / Crafting Tab
+        if (!recipes.isEmpty() || (brewingRecipes.isEmpty() && villagerTrades.isEmpty() && mobDrops.isEmpty() && customCategories.isEmpty())) {
+            tabs.add(new CategoryTab("recipes", "Crafting", new ItemStack(Items.CRAFTING_TABLE), recipes.size(), null));
+        }
+
+        // 2. Brewing Tab
+        if (!brewingRecipes.isEmpty()) {
+            tabs.add(new CategoryTab("brewing", "Brewing", new ItemStack(Items.BREWING_STAND), brewingRecipes.size(), null));
+        }
+
+        // 3. Trading Tab
+        if (!villagerTrades.isEmpty()) {
+            tabs.add(new CategoryTab("trading", "Trading", new ItemStack(Items.EMERALD), villagerTrades.size(), null));
+        }
+
+        // 4. Mob Drops Tab
+        if (!mobDrops.isEmpty()) {
+            tabs.add(new CategoryTab("drops", "Mob Drops", new ItemStack(Items.BONE), mobDrops.size(), null));
+        }
+
+        // 5. Crafting Tree Tab
+        if (mode == Mode.CRAFTING && !recipes.isEmpty()) {
+            tabs.add(new CategoryTab("tree", "🌳 Tree", new ItemStack(Items.OAK_SAPLING), 1, null));
+        }
+
+        // 6. Custom Machine & JEI Plugin Categories
+        for (Map.Entry<IDexRecipeCategory<?>, List<DexRegistriesImpl.CustomRecipeEntry>> entry : customCategories.entrySet()) {
+            IDexRecipeCategory<?> category = entry.getKey();
+            List<DexRegistriesImpl.CustomRecipeEntry> entries = entry.getValue();
+            String title = category.getTitle() != null ? category.getTitle().getString() : category.getId().getPath();
+            ItemStack icon = category.getIcon() != null && !category.getIcon().isEmpty() ? category.getIcon() : new ItemStack(Items.FURNACE);
+            tabs.add(new CategoryTab(category.getId().toString(), title, icon, entries.size(), category));
+        }
+
+        if (activeTabIndex >= tabs.size()) {
+            activeTabIndex = 0;
+        }
+    }
+
+    public HistoryEntry saveState() {
+        String tabId = !tabs.isEmpty() ? tabs.get(activeTabIndex).id : "recipes";
+        int currentIdx = tabRecipeIndices.getOrDefault(tabId, 0);
+        return new HistoryEntry(targetItem, mode, tabId, currentIdx);
+    }
+
+    public void restoreState(HistoryEntry entry) {
+        for (int i = 0; i < tabs.size(); i++) {
+            if (tabs.get(i).id.equals(entry.activeTabId())) {
+                this.activeTabIndex = i;
+                this.tabRecipeIndices.put(entry.activeTabId(), entry.recipeIndex());
+                break;
+            }
+        }
+    }
+
     public static void openRecipes(ItemStack stack) {
-        if (stack.isEmpty()) return;
+        if (stack == null || stack.isEmpty()) return;
         Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof RecipeViewerScreen current) {
+            HISTORY.push(current.saveState());
+        }
         mc.setScreen(new RecipeViewerScreen(mc.screen, stack, Mode.CRAFTING));
     }
 
     public static void openUsages(ItemStack stack) {
-        if (stack.isEmpty()) return;
+        if (stack == null || stack.isEmpty()) return;
         Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof RecipeViewerScreen current) {
+            HISTORY.push(current.saveState());
+        }
         mc.setScreen(new RecipeViewerScreen(mc.screen, stack, Mode.USAGE));
+    }
+
+    private void goBack() {
+        Minecraft mc = Minecraft.getInstance();
+        if (!HISTORY.isEmpty()) {
+            HistoryEntry prev = HISTORY.pop();
+            RecipeViewerScreen screen = new RecipeViewerScreen(previousScreen, prev.targetItem(), prev.mode());
+            screen.restoreState(prev);
+            mc.setScreen(screen);
+        } else {
+            mc.setScreen(previousScreen);
+        }
     }
 
     @Override
@@ -124,28 +217,31 @@ public class RecipeViewerScreen extends Screen {
     private void rebuildCategoryButtons() {
         this.clearWidgets();
 
-        // 1. Category Tabs at Top
-        int tabX = guiLeft + 8;
+        // 1. Back Button
+        if (!HISTORY.isEmpty()) {
+            this.addRenderableWidget(Button.builder(Component.literal("⮌ Back"), b -> goBack())
+                    .bounds(guiLeft + 6, guiTop + 4, 48, 14).build());
+        }
+
+        // 2. Category Tabs at Top
+        int tabX = guiLeft + (!HISTORY.isEmpty() ? 58 : 8);
         int tabY = guiTop + 22;
         int tabHeight = 16;
 
-        List<Category> available = new ArrayList<>();
-        if (!recipes.isEmpty() || (brewingRecipes.isEmpty() && villagerTrades.isEmpty() && mobDrops.isEmpty())) {
-            available.add(Category.RECIPES);
-        }
-        if (!brewingRecipes.isEmpty()) available.add(Category.BREWING);
-        if (!villagerTrades.isEmpty()) available.add(Category.TRADING);
-        if (!mobDrops.isEmpty()) available.add(Category.MOB_DROPS);
-        if (mode == Mode.CRAFTING && !recipes.isEmpty()) available.add(Category.TREE);
+        for (int i = 0; i < tabs.size(); i++) {
+            CategoryTab tab = tabs.get(i);
+            int tabIndex = i;
+            boolean isActive = (i == activeTabIndex);
+            int btnWidth = font.width(tab.label) + 10;
 
-        for (Category cat : available) {
-            boolean isActive = cat == activeCategory;
-            int btnWidth = font.width(cat.getLabel()) + 10;
+            if (tabX + btnWidth > guiLeft + guiWidth - 6) {
+                break; // Prevent overflowing screen width
+            }
 
             this.addRenderableWidget(Button.builder(
-                    Component.literal(cat.getLabel()).withStyle(isActive ? ChatFormatting.GOLD : ChatFormatting.GRAY),
+                    Component.literal(tab.label).withStyle(isActive ? ChatFormatting.GOLD : ChatFormatting.GRAY),
                     b -> {
-                        this.activeCategory = cat;
+                        this.activeTabIndex = tabIndex;
                         rebuildCategoryButtons();
                     }
             ).bounds(tabX, tabY, btnWidth, tabHeight).build());
@@ -153,51 +249,36 @@ public class RecipeViewerScreen extends Screen {
             tabX += btnWidth + 2;
         }
 
-        // 2. Navigation & Action Buttons depending on Category
-        if (activeCategory == Category.RECIPES) {
+        if (tabs.isEmpty()) return;
+        CategoryTab currentTab = tabs.get(activeTabIndex);
+        String currentTabId = currentTab.id;
+        int currentIndex = tabRecipeIndices.getOrDefault(currentTabId, 0);
+
+        // 3. Navigation Buttons (< and >)
+        if (!"tree".equals(currentTabId) && currentTab.recipeCount > 1) {
             // Previous recipe button
             this.addRenderableWidget(Button.builder(Component.literal("<"), b -> {
-                if (currentRecipeIndex > 0) currentRecipeIndex--;
+                int cur = tabRecipeIndices.getOrDefault(currentTabId, 0);
+                if (cur > 0) {
+                    tabRecipeIndices.put(currentTabId, cur - 1);
+                }
             }).bounds(guiLeft + 8, guiTop + 42, 18, 16).build());
 
             // Next recipe button
             this.addRenderableWidget(Button.builder(Component.literal(">"), b -> {
-                if (currentRecipeIndex < recipes.size() - 1) currentRecipeIndex++;
+                int cur = tabRecipeIndices.getOrDefault(currentTabId, 0);
+                if (cur < currentTab.recipeCount - 1) {
+                    tabRecipeIndices.put(currentTabId, cur + 1);
+                }
             }).bounds(guiLeft + guiWidth - 26, guiTop + 42, 18, 16).build());
+        }
 
-            // Auto-transfer '+' button
+        // 4. Auto-transfer '+' button (only for vanilla crafting table recipes)
+        if ("recipes".equals(currentTabId) && !recipes.isEmpty()) {
             this.addRenderableWidget(Button.builder(Component.literal("+"), b -> {
                 transferRecipe();
             }).bounds(guiLeft + guiWidth - 26, guiTop + guiHeight - 24, 18, 16).build());
-
-        } else if (activeCategory == Category.BREWING) {
-            this.addRenderableWidget(Button.builder(Component.literal("<"), b -> {
-                if (currentBrewingIndex > 0) currentBrewingIndex--;
-            }).bounds(guiLeft + 8, guiTop + 42, 18, 16).build());
-
-            this.addRenderableWidget(Button.builder(Component.literal(">"), b -> {
-                if (currentBrewingIndex < brewingRecipes.size() - 1) currentBrewingIndex++;
-            }).bounds(guiLeft + guiWidth - 26, guiTop + 42, 18, 16).build());
-
-        } else if (activeCategory == Category.TRADING) {
-            this.addRenderableWidget(Button.builder(Component.literal("<"), b -> {
-                if (currentTradeIndex > 0) currentTradeIndex--;
-            }).bounds(guiLeft + 8, guiTop + 42, 18, 16).build());
-
-            this.addRenderableWidget(Button.builder(Component.literal(">"), b -> {
-                if (currentTradeIndex < villagerTrades.size() - 1) currentTradeIndex++;
-            }).bounds(guiLeft + guiWidth - 26, guiTop + 42, 18, 16).build());
-
-        } else if (activeCategory == Category.MOB_DROPS) {
-            this.addRenderableWidget(Button.builder(Component.literal("<"), b -> {
-                if (currentMobDropIndex > 0) currentMobDropIndex--;
-            }).bounds(guiLeft + 8, guiTop + 42, 18, 16).build());
-
-            this.addRenderableWidget(Button.builder(Component.literal(">"), b -> {
-                if (currentMobDropIndex < mobDrops.size() - 1) currentMobDropIndex++;
-            }).bounds(guiLeft + guiWidth - 26, guiTop + 42, 18, 16).build());
-
-        } else if (activeCategory == Category.TREE) {
+        } else if ("tree".equals(currentTabId)) {
             // Multiplier buttons for tree calculator: [x1] [x4] [x16] [x64]
             int multX = guiLeft + 8;
             int[] mults = {1, 4, 16, 64};
@@ -221,21 +302,19 @@ public class RecipeViewerScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         if (recipes.isEmpty() || mc.player == null || mc.getConnection() == null) return;
 
-        RecipeHolder<?> holder = recipes.get(currentRecipeIndex);
+        int cur = tabRecipeIndices.getOrDefault("recipes", 0);
+        if (cur < 0 || cur >= recipes.size()) cur = 0;
+        RecipeHolder<?> holder = recipes.get(cur);
 
         if (mc.player.containerMenu != null) {
             int containerId = mc.player.containerMenu.containerId;
             boolean shift = Screen.hasShiftDown();
 
-            // Send standard vanilla/neoforge placement packet
             mc.getConnection().send(new ServerboundPlaceRecipePacket(containerId, holder, shift));
-
             mc.player.displayClientMessage(
                     Component.literal("DEX: Auto-filled recipe to crafting table!").withStyle(ChatFormatting.GREEN),
                     true
             );
-
-            // Return to container screen so player sees the items filled
             mc.setScreen(previousScreen);
         } else {
             mc.player.displayClientMessage(
@@ -250,21 +329,34 @@ public class RecipeViewerScreen extends Screen {
         super.render(graphics, mouseX, mouseY, partialTick);
         hoveredSlotItem = ItemStack.EMPTY;
 
-        // Background Box
-        graphics.fill(guiLeft, guiTop, guiLeft + guiWidth, guiTop + guiHeight, 0xEE1E1E24);
+        // Background Box (Dark Modern Slate Glassmorphism)
+        graphics.fill(guiLeft, guiTop, guiLeft + guiWidth, guiTop + guiHeight, 0xF018181E);
         graphics.renderOutline(guiLeft, guiTop, guiWidth, guiHeight, 0xFF4A4A5A);
 
         // Header Title
         String titleStr = (mode == Mode.CRAFTING ? "Crafting: " : "Usages of: ") + targetItem.getHoverName().getString();
-        graphics.drawCenteredString(font, titleStr, guiLeft + guiWidth / 2, guiTop + 8, 0xFFFFAA00);
+        int titleX = guiLeft + guiWidth / 2;
+        graphics.drawCenteredString(font, titleStr, titleX, guiTop + 7, 0xFFFFAA00);
 
-        // Render Active Category
-        switch (activeCategory) {
-            case RECIPES -> renderRecipesView(graphics, mouseX, mouseY);
-            case BREWING -> renderBrewingView(graphics, mouseX, mouseY);
-            case TRADING -> renderTradingView(graphics, mouseX, mouseY);
-            case MOB_DROPS -> renderMobDropsView(graphics, mouseX, mouseY);
-            case TREE -> renderTreeView(graphics, mouseX, mouseY);
+        if (tabs.isEmpty()) {
+            graphics.drawCenteredString(font, "No recipes found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
+            return;
+        }
+
+        CategoryTab activeTab = tabs.get(activeTabIndex);
+        int currentIdx = tabRecipeIndices.getOrDefault(activeTab.id, 0);
+
+        switch (activeTab.id) {
+            case "recipes" -> renderRecipesView(graphics, currentIdx, mouseX, mouseY);
+            case "brewing" -> renderBrewingView(graphics, currentIdx, mouseX, mouseY);
+            case "trading" -> renderTradingView(graphics, currentIdx, mouseX, mouseY);
+            case "drops" -> renderMobDropsView(graphics, currentIdx, mouseX, mouseY);
+            case "tree" -> renderTreeView(graphics, mouseX, mouseY);
+            default -> {
+                if (activeTab.customCategory != null) {
+                    renderCustomCategoryView(graphics, activeTab.customCategory, currentIdx, mouseX, mouseY);
+                }
+            }
         }
 
         // Render Tooltip for hovered slot item
@@ -273,12 +365,13 @@ public class RecipeViewerScreen extends Screen {
         }
     }
 
-    private void renderRecipesView(GuiGraphics graphics, int mouseX, int mouseY) {
+    private void renderRecipesView(GuiGraphics graphics, int currentRecipeIndex, int mouseX, int mouseY) {
         if (recipes.isEmpty()) {
             graphics.drawCenteredString(font, "No recipes found for this item.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
             return;
         }
 
+        if (currentRecipeIndex >= recipes.size()) currentRecipeIndex = 0;
         RecipeHolder<?> currentHolder = recipes.get(currentRecipeIndex);
         Recipe<?> recipe = currentHolder.value();
         ResourceLocation recipeId = currentHolder.id();
@@ -412,12 +505,13 @@ public class RecipeViewerScreen extends Screen {
         }
     }
 
-    private void renderBrewingView(GuiGraphics graphics, int mouseX, int mouseY) {
+    private void renderBrewingView(GuiGraphics graphics, int currentBrewingIndex, int mouseX, int mouseY) {
         if (brewingRecipes.isEmpty()) {
             graphics.drawCenteredString(font, "No brewing recipes found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
             return;
         }
 
+        if (currentBrewingIndex >= brewingRecipes.size()) currentBrewingIndex = 0;
         BrewingRecipeEntry entry = brewingRecipes.get(currentBrewingIndex);
         int centerX = guiLeft + guiWidth / 2;
         int centerY = guiTop + 115;
@@ -463,12 +557,13 @@ public class RecipeViewerScreen extends Screen {
         graphics.drawCenteredString(font, "Brewing Stand Recipe", centerX, centerY + 30, 0xFFAAAAAA);
     }
 
-    private void renderTradingView(GuiGraphics graphics, int mouseX, int mouseY) {
+    private void renderTradingView(GuiGraphics graphics, int currentTradeIndex, int mouseX, int mouseY) {
         if (villagerTrades.isEmpty()) {
             graphics.drawCenteredString(font, "No trading offers found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
             return;
         }
 
+        if (currentTradeIndex >= villagerTrades.size()) currentTradeIndex = 0;
         VillagerTradeEntry trade = villagerTrades.get(currentTradeIndex);
         int centerX = guiLeft + guiWidth / 2;
         int centerY = guiTop + 115;
@@ -507,12 +602,13 @@ public class RecipeViewerScreen extends Screen {
         graphics.drawCenteredString(font, "Villager & Wandering Trader Offers", centerX, centerY + 26, 0xFFAAAAAA);
     }
 
-    private void renderMobDropsView(GuiGraphics graphics, int mouseX, int mouseY) {
+    private void renderMobDropsView(GuiGraphics graphics, int currentMobDropIndex, int mouseX, int mouseY) {
         if (mobDrops.isEmpty()) {
             graphics.drawCenteredString(font, "No mob drops found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
             return;
         }
 
+        if (currentMobDropIndex >= mobDrops.size()) currentMobDropIndex = 0;
         MobDropEntry drop = mobDrops.get(currentMobDropIndex);
         int centerX = guiLeft + guiWidth / 2;
         int centerY = guiTop + 115;
@@ -527,7 +623,6 @@ public class RecipeViewerScreen extends Screen {
         checkSlotHover(drop.getRepresentativeIcon(), mobX + 1, centerY - 9, mouseX, mouseY);
 
         graphics.drawString(font, drop.getMobName(), centerX - 40, centerY - 18, 0xFFFFCC00);
-
         graphics.drawString(font, "➔", centerX + 2, centerY - 6, 0xFFFFFFFF);
 
         // Drop Item Slot
@@ -537,7 +632,6 @@ public class RecipeViewerScreen extends Screen {
         graphics.renderItemDecorations(font, drop.getDropItem(), dropX + 1, centerY - 9);
         checkSlotHover(drop.getDropItem(), dropX + 1, centerY - 9, mouseX, mouseY);
 
-        // Drop Chance info
         graphics.drawCenteredString(font, "Chance: " + drop.getDropChance(), centerX, centerY + 26, 0xFFAAAAAA);
     }
 
@@ -549,11 +643,9 @@ public class RecipeViewerScreen extends Screen {
 
         graphics.drawString(font, "Crafting Tree (Decomposition):", startX, startY, 0xFFFFAA00);
 
-        // Render Tree Branch lines
         int lineY = startY + 14;
         lineY = renderTreeNode(graphics, cachedTree, startX, lineY, 0, mouseX, mouseY);
 
-        // Render Base / Raw Materials Summary Box at Bottom
         int summaryY = guiTop + guiHeight - 48;
         graphics.fill(guiLeft + 8, summaryY, guiLeft + guiWidth - 8, guiTop + guiHeight - 8, 0xFF2A2A35);
         graphics.renderOutline(guiLeft + 8, summaryY, guiWidth - 16, 40, 0xFF4A4A5A);
@@ -602,6 +694,58 @@ public class RecipeViewerScreen extends Screen {
         return y;
     }
 
+    @SuppressWarnings("unchecked")
+    private <T> void renderCustomCategoryView(GuiGraphics graphics, IDexRecipeCategory<?> categoryRaw, int currentIdx, int mouseX, int mouseY) {
+        IDexRecipeCategory<T> category = (IDexRecipeCategory<T>) categoryRaw;
+        List<DexRegistriesImpl.CustomRecipeEntry> entries = customCategories.get(categoryRaw);
+        if (entries == null || entries.isEmpty()) {
+            graphics.drawCenteredString(font, "No custom machine recipes found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
+            return;
+        }
+
+        if (currentIdx >= entries.size()) currentIdx = 0;
+        DexRegistriesImpl.CustomRecipeEntry entry = entries.get(currentIdx);
+        T recipe = (T) entry.recipe();
+
+        String pageInfo = "Recipe " + (currentIdx + 1) + " of " + entries.size();
+        graphics.drawCenteredString(font, pageInfo, guiLeft + guiWidth / 2, guiTop + 45, 0xFFFFFFFF);
+
+        String title = category.getTitle() != null ? category.getTitle().getString() : category.getId().getPath();
+        graphics.drawCenteredString(font, title + " (" + category.getId().getNamespace() + ")",
+                guiLeft + guiWidth / 2, guiTop + 58, 0xFF88AAFF);
+
+        int centerX = guiLeft + guiWidth / 2;
+        int centerY = guiTop + 115;
+
+        // Draw custom background/category graphics
+        try {
+            category.draw(recipe, graphics, mouseX, mouseY);
+        } catch (Throwable ignored) {
+        }
+
+        // Render slots
+        List<DexRecipeSlot> slots = entry.slots();
+        if (slots != null && !slots.isEmpty()) {
+            // Calculate slot offset based on category display size
+            int offX = centerX - 60;
+            int offY = centerY - 30;
+
+            for (DexRecipeSlot slot : slots) {
+                int sX = offX + slot.x();
+                int sY = offY + slot.y();
+                drawSlot(graphics, sX, sY);
+
+                if (!slot.items().isEmpty()) {
+                    int cycleIdx = (int) ((System.currentTimeMillis() / 1000) % slot.items().size());
+                    ItemStack stack = slot.items().get(cycleIdx);
+                    graphics.renderItem(stack, sX + 1, sY + 1);
+                    graphics.renderItemDecorations(font, stack, sX + 1, sY + 1);
+                    checkSlotHover(stack, sX + 1, sY + 1, mouseX, mouseY);
+                }
+            }
+        }
+    }
+
     private void drawSlot(GuiGraphics graphics, int x, int y) {
         graphics.fill(x, y, x + 18, y + 18, 0xFF373742);
         graphics.renderOutline(x, y, 18, 18, 0xFF5C5C70);
@@ -642,10 +786,55 @@ public class RecipeViewerScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // ESC or Inventory key: return or close
         if (keyCode == 256 || keyCode == Minecraft.getInstance().options.keyInventory.getKey().getValue()) {
             Minecraft.getInstance().setScreen(previousScreen);
             return true;
         }
+
+        // Backspace (keyCode 259): return to previous recipe in history
+        if (keyCode == 259) {
+            goBack();
+            return true;
+        }
+
+        // Hovered Slot Shortcuts: R (Recipes), U (Usages), A (Pin to Bookmarks)
+        if (!hoveredSlotItem.isEmpty()) {
+            if (keyCode == 82) { // R
+                openRecipes(hoveredSlotItem);
+                return true;
+            } else if (keyCode == 85) { // U
+                openUsages(hoveredSlotItem);
+                return true;
+            } else if (keyCode == 65) { // A
+                boolean added = BookmarkManager.getInstance().toggleBookmark(hoveredSlotItem);
+                Minecraft mc = Minecraft.getInstance();
+                if (mc.player != null) {
+                    mc.player.displayClientMessage(
+                            Component.literal("DEX: " + (added ? "Pinned " : "Unpinned ") + hoveredSlotItem.getHoverName().getString() + " to Bookmarks!")
+                                    .withStyle(added ? ChatFormatting.GOLD : ChatFormatting.GRAY),
+                            true
+                    );
+                }
+                return true;
+            }
+        }
+
+        // Left Arrow (263) and Right Arrow (262): page through recipes of the active tab
+        if (!tabs.isEmpty()) {
+            CategoryTab activeTab = tabs.get(activeTabIndex);
+            if (activeTab.recipeCount > 1) {
+                int cur = tabRecipeIndices.getOrDefault(activeTab.id, 0);
+                if (keyCode == 263 && cur > 0) { // Left arrow
+                    tabRecipeIndices.put(activeTab.id, cur - 1);
+                    return true;
+                } else if (keyCode == 262 && cur < activeTab.recipeCount - 1) { // Right arrow
+                    tabRecipeIndices.put(activeTab.id, cur + 1);
+                    return true;
+                }
+            }
+        }
+
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 

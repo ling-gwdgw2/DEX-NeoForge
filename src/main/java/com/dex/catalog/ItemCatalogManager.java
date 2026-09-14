@@ -1,6 +1,7 @@
 package com.dex.catalog;
 
 import com.dex.DEXMod;
+import com.dex.client.bookmark.BookmarkManager;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -17,11 +18,13 @@ public class ItemCatalogManager {
     private static final ItemCatalogManager INSTANCE = new ItemCatalogManager();
 
     public static final String ALL_MODS_ID = "__all__";
+    public static final String BOOKMARKS_MOD_ID = "__bookmarks__";
     private static final Pattern TOKEN_PATTERN = Pattern.compile("\"([^\"]*)\"|(\\S+)");
 
     public enum SearchTokenType {
         MOD,
         TAG,
+        TOOLTIP,
         NAME_OR_ID
     }
 
@@ -37,6 +40,7 @@ public class ItemCatalogManager {
                     }
                     yield false;
                 }
+                case TOOLTIP -> entry.lowerTooltip.contains(term) || entry.lowerName.contains(term);
                 case NAME_OR_ID -> entry.lowerName.contains(term) || entry.lowerId.contains(term);
             };
 
@@ -50,15 +54,17 @@ public class ItemCatalogManager {
         public final String lowerId;
         public final String lowerModId;
         public final String lowerModName;
+        public final String lowerTooltip;
         public final Set<String> lowerTags;
 
         public ItemSearchEntry(ItemStack stack, String lowerName, String lowerId,
-                               String lowerModId, String lowerModName, Set<String> lowerTags) {
+                               String lowerModId, String lowerModName, String lowerTooltip, Set<String> lowerTags) {
             this.stack = stack;
             this.lowerName = lowerName;
             this.lowerId = lowerId;
             this.lowerModId = lowerModId;
             this.lowerModName = lowerModName;
+            this.lowerTooltip = lowerTooltip;
             this.lowerTags = lowerTags;
         }
 
@@ -69,6 +75,39 @@ public class ItemCatalogManager {
                 }
             }
             return true;
+        }
+
+        public int calculateScore(List<SearchToken> tokens, String rawQuery) {
+            int score = 0;
+            String q = rawQuery.toLowerCase(Locale.ROOT).trim();
+            if (lowerName.equals(q)) {
+                score += 10000;
+            } else if (lowerName.startsWith(q)) {
+                score += 5000;
+            } else if (lowerName.contains(" " + q)) {
+                score += 2500;
+            } else if (lowerName.contains(q)) {
+                score += 1000;
+            } else if (lowerId.contains(q)) {
+                score += 400;
+            }
+
+            // Direct compact names rank slightly higher than lengthy sub-variants
+            score -= Math.min(200, lowerName.length());
+
+            for (SearchToken token : tokens) {
+                if (!token.negate()) {
+                    String term = token.term();
+                    if (lowerName.startsWith(term)) {
+                        score += 300;
+                    } else if (lowerName.contains(" " + term)) {
+                        score += 200;
+                    } else if (lowerName.contains(term)) {
+                        score += 100;
+                    }
+                }
+            }
+            return score;
         }
     }
 
@@ -92,7 +131,7 @@ public class ItemCatalogManager {
         if (initialized) return;
 
         long startTime = System.currentTimeMillis();
-        DEXMod.LOGGER.info("Starting optimized ItemCatalogManager indexing...");
+        DEXMod.LOGGER.info("Starting optimized ItemCatalogManager indexing with relevance scoring...");
 
         modInfoMap.clear();
         sortedModList.clear();
@@ -104,7 +143,11 @@ public class ItemCatalogManager {
         ModInfo allMods = new ModInfo(ALL_MODS_ID, "All Items", "Show all items across all mods", "");
         allMods.setRepresentativeItem(new ItemStack(Items.CHEST));
 
-        // 2. Iterate through BuiltInRegistries.ITEM
+        // 2. Create special BOOKMARKS entry
+        ModInfo bookmarksMod = new ModInfo(BOOKMARKS_MOD_ID, "★ Bookmarks", "Show pinned and favorite items (Press 'A' to pin)", "");
+        bookmarksMod.setRepresentativeItem(new ItemStack(Items.NETHER_STAR));
+
+        // 3. Iterate through BuiltInRegistries.ITEM
         for (Item item : BuiltInRegistries.ITEM) {
             if (item == Items.AIR) continue;
 
@@ -147,6 +190,7 @@ public class ItemCatalogManager {
             String lowerId = key.toString().toLowerCase(Locale.ROOT);
             String lowerModId = namespace.toLowerCase(Locale.ROOT);
             String lowerModName = mod.getDisplayName().toLowerCase(Locale.ROOT);
+            String lowerTooltip = (lowerName + " " + lowerId + " " + stack.getDescriptionId()).toLowerCase(Locale.ROOT);
 
             Set<String> lowerTags = new HashSet<>();
             stack.getTags().forEach(tagKey -> {
@@ -155,12 +199,12 @@ public class ItemCatalogManager {
                 lowerTags.add(tagLoc.getPath().toLowerCase(Locale.ROOT));
             });
 
-            ItemSearchEntry entry = new ItemSearchEntry(stack, lowerName, lowerId, lowerModId, lowerModName, lowerTags);
+            ItemSearchEntry entry = new ItemSearchEntry(stack, lowerName, lowerId, lowerModId, lowerModName, lowerTooltip, lowerTags);
             allSearchEntries.add(entry);
             searchEntriesByMod.computeIfAbsent(namespace, k -> new ArrayList<>()).add(entry);
         }
 
-        // 3. Sort mods: Minecraft first, then alphabetically by display name
+        // 4. Sort mods: Minecraft first, then alphabetically by display name
         sortedModList.addAll(modInfoMap.values());
         sortedModList.sort((a, b) -> {
             if ("minecraft".equalsIgnoreCase(a.getModId())) return -1;
@@ -168,7 +212,8 @@ public class ItemCatalogManager {
             return a.getDisplayName().compareToIgnoreCase(b.getDisplayName());
         });
 
-        // Add ALL entry at the head of the list
+        // Add ALL entry and BOOKMARKS entry at the head of the list
+        sortedModList.add(0, bookmarksMod);
         sortedModList.add(0, allMods);
 
         initialized = true;
@@ -203,6 +248,7 @@ public class ItemCatalogManager {
      * - Multi-word tokens: "iron sword"
      * - Mod prefix: @create, @minecraft
      * - Tag prefix: #c:ingots, #ores
+     * - Tooltip prefix: $sharpness, $speed
      * - Negation prefix: -ingot, -#c:plates, -@minecraft
      * - Exact quotes: "raw iron"
      */
@@ -233,6 +279,9 @@ public class ItemCatalogManager {
             } else if (raw.startsWith("#") && raw.length() > 1) {
                 type = SearchTokenType.TAG;
                 term = raw.substring(1);
+            } else if (raw.startsWith("$") && raw.length() > 1) {
+                type = SearchTokenType.TOOLTIP;
+                term = raw.substring(1);
             }
 
             term = term.toLowerCase(Locale.ROOT).trim();
@@ -245,11 +294,18 @@ public class ItemCatalogManager {
     }
 
     /**
-     * Instantaneous in-memory filtering across precomputed search entries.
+     * In-memory filtering and relevance sorting.
      */
     public void updateFilter() {
         List<ItemSearchEntry> pool;
-        if (ALL_MODS_ID.equals(selectedModId)) {
+        if (BOOKMARKS_MOD_ID.equals(selectedModId)) {
+            pool = new ArrayList<>();
+            for (ItemSearchEntry entry : allSearchEntries) {
+                if (BookmarkManager.getInstance().isBookmarked(entry.stack)) {
+                    pool.add(entry);
+                }
+            }
+        } else if (ALL_MODS_ID.equals(selectedModId)) {
             pool = allSearchEntries;
         } else {
             pool = searchEntriesByMod.getOrDefault(selectedModId, Collections.emptyList());
@@ -274,11 +330,22 @@ public class ItemCatalogManager {
             return;
         }
 
-        List<ItemStack> filtered = new ArrayList<>();
+        List<ItemSearchEntry> matchingEntries = new ArrayList<>();
         for (ItemSearchEntry entry : pool) {
             if (entry.matchesAll(tokens)) {
-                filtered.add(entry.stack);
+                matchingEntries.add(entry);
             }
+        }
+
+        // Rank by relevance
+        matchingEntries.sort((a, b) -> Integer.compare(
+                b.calculateScore(tokens, currentSearchQuery),
+                a.calculateScore(tokens, currentSearchQuery)
+        ));
+
+        List<ItemStack> filtered = new ArrayList<>(matchingEntries.size());
+        for (ItemSearchEntry entry : matchingEntries) {
+            filtered.add(entry.stack);
         }
 
         currentFilteredItems = filtered;

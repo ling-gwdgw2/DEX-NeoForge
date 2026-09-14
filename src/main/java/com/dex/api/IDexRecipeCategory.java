@@ -45,4 +45,11 @@ public interface IDexRecipeCategory<T> {
      */
     default void draw(T recipe, GuiGraphics graphics, double mouseX, double mouseY) {
     }
+
+    /**
+     * Returns the layout slot positions and ingredients for this recipe.
+     */
+    default java.util.List<DexRecipeSlot> getSlots(T recipe) {
+        return java.util.Collections.emptyList();
+    }
 }
