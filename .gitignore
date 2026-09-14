@@ -1,0 +1,39 @@
+# Gradle build artifacts and caches
+.gradle/
+build/
+bin/
+out/
+
+# IDE configurations
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+
+# Minecraft & NeoForge runtime test directories
+run/
+crash-reports/
+logs/
+*.log
+*.lck
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Scratch and temporary directories
+scratch/
+net/
+*.bak
+*.orig
+*.rej
+
+# Ensure Gradle wrapper jar and properties are always tracked
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
