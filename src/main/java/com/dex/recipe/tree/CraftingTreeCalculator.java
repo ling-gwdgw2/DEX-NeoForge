@@ -59,7 +59,7 @@ public class CraftingTreeCalculator {
                 : null;
 
         ItemStack resultStack = recipe.getResultItem(registryAccess);
-        int resultCount = Math.max(1, resultStack.getCount());
+        int resultCount = (resultStack != null && !resultStack.isEmpty()) ? Math.max(1, resultStack.getCount()) : 1;
 
         int craftsNeeded = (int) Math.ceil((double) count / resultCount);
 

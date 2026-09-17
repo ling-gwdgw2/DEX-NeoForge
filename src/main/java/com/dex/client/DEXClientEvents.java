@@ -363,6 +363,7 @@ public class DEXClientEvents {
 
     @SubscribeEvent
     public static void onItemTooltip(ItemTooltipEvent event) {
+        if (!com.dex.client.config.DEXConfig.get().isShowModTooltips()) return;
         ItemStack stack = event.getItemStack();
         if (stack.isEmpty()) return;
 

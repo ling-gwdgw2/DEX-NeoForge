@@ -2,6 +2,7 @@ package com.dex.client.gui.overlay;
 
 import com.dex.catalog.ItemCatalogManager;
 import com.dex.catalog.ModInfo;
+import com.dex.client.util.DexSoundHelper;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -124,11 +125,13 @@ public class ModSidebarWidget {
         // Click top arrow
         if (mouseY < y + 8 && scrollOffset > 0) {
             scrollOffset--;
+            DexSoundHelper.playButtonClick();
             return true;
         }
         // Click bottom arrow
         if (mouseY > y + height - 8 && scrollOffset < maxScroll) {
             scrollOffset++;
+            DexSoundHelper.playButtonClick();
             return true;
         }
 
@@ -137,6 +140,7 @@ public class ModSidebarWidget {
         if (clickedIndex >= 0 && clickedIndex < mods.size()) {
             ModInfo mod = mods.get(clickedIndex);
             catalog.selectMod(mod.getModId());
+            DexSoundHelper.playButtonClick();
             return true;
         }
 

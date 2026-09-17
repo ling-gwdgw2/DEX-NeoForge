@@ -164,14 +164,16 @@ public class ItemGridOverlay {
             List<Component> tooltips = new ArrayList<>(mc.screen != null ? mc.screen.getTooltipFromItem(mc, hoveredStack) : List.of());
 
             // Add Origin Mod information
-            ResourceLocation key = BuiltInRegistries.ITEM.getKey(hoveredStack.getItem());
-            String namespace = key.getNamespace();
-            ModInfo modInfo = ItemCatalogManager.getInstance().getModInfo(namespace);
-            String modDisplay = modInfo != null ? modInfo.getDisplayName() : namespace;
+            if (com.dex.client.config.DEXConfig.get().isShowModTooltips()) {
+                ResourceLocation key = BuiltInRegistries.ITEM.getKey(hoveredStack.getItem());
+                String namespace = key.getNamespace();
+                ModInfo modInfo = ItemCatalogManager.getInstance().getModInfo(namespace);
+                String modDisplay = modInfo != null ? modInfo.getDisplayName() : namespace;
 
-            tooltips.add(Component.empty());
-            tooltips.add(Component.literal("Origin: ").withStyle(ChatFormatting.DARK_GRAY)
-                    .append(Component.literal(modDisplay).withStyle(ChatFormatting.BLUE, ChatFormatting.ITALIC)));
+                tooltips.add(Component.empty());
+                tooltips.add(Component.literal("Origin: ").withStyle(ChatFormatting.DARK_GRAY)
+                        .append(Component.literal(modDisplay).withStyle(ChatFormatting.BLUE, ChatFormatting.ITALIC)));
+            }
 
             // Add Recipe/Usage/Pin hints
             boolean hasRecipes = RecipeIndexManager.getInstance().hasRecipes(hoveredStack);
