@@ -160,10 +160,22 @@ public class MockJeiRegistrations {
 
         @Override
         public <T> void addIngredientInfo(T ingredient, IIngredientType<T> ingredientType, Component... descriptionComponents) {
+            if (ingredient == null || descriptionComponents == null || descriptionComponents.length == 0) return;
+            if (VanillaTypes.ITEM_STACK.equals(ingredientType) && ingredient instanceof ItemStack stack && !stack.isEmpty()) {
+                com.dex.recipe.info.ItemInfoRegistry.getInstance().addInfo(stack.getItem(), descriptionComponents);
+            }
         }
 
         @Override
         public <T> void addIngredientInfo(List<T> ingredients, IIngredientType<T> ingredientType, Component... descriptionComponents) {
+            if (ingredients == null || descriptionComponents == null || descriptionComponents.length == 0) return;
+            if (VanillaTypes.ITEM_STACK.equals(ingredientType)) {
+                for (T obj : ingredients) {
+                    if (obj instanceof ItemStack stack && !stack.isEmpty()) {
+                        com.dex.recipe.info.ItemInfoRegistry.getInstance().addInfo(stack.getItem(), descriptionComponents);
+                    }
+                }
+            }
         }
 
         public Map<RecipeType<?>, List<Object>> getRecipes() {

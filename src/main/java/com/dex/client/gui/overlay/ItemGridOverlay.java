@@ -49,7 +49,7 @@ public class ItemGridOverlay {
 
         Font font = mc.font;
         int searchY = y + height - 18;
-        int searchWidth = width - 4;
+        int searchWidth = width - 24;
         this.searchBox = new EditBox(font, x + 2, searchY, searchWidth, 16, Component.literal("Search"));
         this.searchBox.setHint(Component.literal("Search... (@mod, #tag, -neg)").withStyle(ChatFormatting.DARK_GRAY));
         this.searchBox.setValue(currentText);
@@ -142,6 +142,16 @@ public class ItemGridOverlay {
         if (searchBox != null) {
             searchBox.render(graphics, mouseX, mouseY, partialTick);
         }
+
+        // 5. Render Cheat Mode Toggle Button (⚡)
+        int cheatBtnX = x + width - 20;
+        int cheatBtnY = y + height - 18;
+        boolean cheatActive = com.dex.client.config.DEXConfig.getInstance().isCheatMode();
+        boolean cheatHovered = mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16;
+
+        graphics.fill(cheatBtnX, cheatBtnY, cheatBtnX + 18, cheatBtnY + 16, cheatActive ? 0xD0442A00 : 0x80222228);
+        graphics.renderOutline(cheatBtnX, cheatBtnY, 18, 16, cheatActive ? 0xFFFFBB00 : (cheatHovered ? 0xFFFFFFFF : 0xFF555566));
+        graphics.drawCenteredString(font, "⚡", cheatBtnX + 9, cheatBtnY + 4, cheatActive ? 0xFFFFDD33 : (cheatHovered ? 0xFFE0E0E0 : 0xFF888899));
     }
 
     public void renderTooltips(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -175,6 +185,20 @@ public class ItemGridOverlay {
             }
 
             graphics.renderComponentTooltip(mc.font, tooltips, mouseX, mouseY);
+        } else {
+            // Check hover on Cheat Mode button
+            int cheatBtnX = x + width - 20;
+            int cheatBtnY = y + height - 18;
+            if (mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16) {
+                boolean cheatActive = com.dex.client.config.DEXConfig.getInstance().isCheatMode();
+                List<Component> cheatTooltips = List.of(
+                        Component.literal("Cheat Mode: " + (cheatActive ? "ON" : "OFF")).withStyle(cheatActive ? ChatFormatting.GOLD : ChatFormatting.GRAY),
+                        Component.literal("• Left-Click item: Give Max Stack").withStyle(ChatFormatting.DARK_GRAY),
+                        Component.literal("• Right-Click item: Give 1 Item").withStyle(ChatFormatting.DARK_GRAY),
+                        Component.literal("• Or hold Ctrl while clicking items").withStyle(ChatFormatting.DARK_GRAY)
+                );
+                graphics.renderComponentTooltip(Minecraft.getInstance().font, cheatTooltips, mouseX, mouseY);
+            }
         }
     }
 
@@ -219,16 +243,43 @@ public class ItemGridOverlay {
             }
         }
 
+        // Cheat Mode Toggle button click
+        int cheatBtnX = x + width - 20;
+        int cheatBtnY = y + height - 18;
+        if (mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16) {
+            boolean active = com.dex.client.config.DEXConfig.getInstance().toggleCheatMode();
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player != null) {
+                mc.player.displayClientMessage(
+                        Component.literal("DEX: Cheat Mode " + (active ? "ENABLED" : "DISABLED"))
+                                .withStyle(active ? ChatFormatting.GOLD : ChatFormatting.GRAY),
+                        true
+                );
+            }
+            return true;
+        }
+
         // Item click
         if (!hoveredStack.isEmpty()) {
-            if (button == 0) {
-                // Left Click -> Recipes
-                RecipeViewerScreen.openRecipes(hoveredStack);
-                return true;
-            } else if (button == 1) {
-                // Right Click -> Usages
-                RecipeViewerScreen.openUsages(hoveredStack);
-                return true;
+            boolean isCheat = com.dex.client.config.DEXConfig.getInstance().isCheatMode() || net.minecraft.client.gui.screens.Screen.hasControlDown();
+            if (isCheat) {
+                if (button == 0) {
+                    com.dex.client.cheat.CheatGiveHelper.give(hoveredStack, true);
+                    return true;
+                } else if (button == 1) {
+                    com.dex.client.cheat.CheatGiveHelper.give(hoveredStack, false);
+                    return true;
+                }
+            } else {
+                if (button == 0) {
+                    // Left Click -> Recipes
+                    RecipeViewerScreen.openRecipes(hoveredStack);
+                    return true;
+                } else if (button == 1) {
+                    // Right Click -> Usages
+                    RecipeViewerScreen.openUsages(hoveredStack);
+                    return true;
+                }
             }
         }
 

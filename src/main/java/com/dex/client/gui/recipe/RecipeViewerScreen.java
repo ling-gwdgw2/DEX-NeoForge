@@ -5,6 +5,7 @@ import com.dex.api.IDexRecipeCategory;
 import com.dex.catalog.ItemCatalogManager;
 import com.dex.catalog.ModInfo;
 import com.dex.client.bookmark.BookmarkManager;
+import com.dex.client.config.DEXConfig;
 import com.dex.plugin.DexPluginManager;
 import com.dex.plugin.DexRegistriesImpl;
 import com.dex.recipe.RecipeIndexManager;
@@ -13,8 +14,10 @@ import com.dex.recipe.brewing.BrewingIndexManager;
 import com.dex.recipe.brewing.BrewingRecipeEntry;
 import com.dex.recipe.drops.MobDropEntry;
 import com.dex.recipe.drops.MobDropIndexManager;
+import com.dex.recipe.info.ItemInfoRegistry;
 import com.dex.recipe.trading.VillagerTradeEntry;
 import com.dex.recipe.trading.VillagerTradeIndexManager;
+import com.dex.recipe.transfer.RecipeTransferHelper;
 import com.dex.recipe.tree.CraftingTreeCalculator;
 import com.dex.recipe.tree.CraftingTreeNode;
 import net.minecraft.ChatFormatting;
@@ -22,6 +25,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundPlaceRecipePacket;
@@ -85,6 +89,7 @@ public class RecipeViewerScreen extends Screen {
     private final int guiHeight = 195;
 
     private ItemStack hoveredSlotItem = ItemStack.EMPTY;
+    private boolean hoveredSlotIsMissing = false;
 
     public RecipeViewerScreen(Screen previousScreen, ItemStack targetItem, Mode mode) {
         super(Component.literal(mode == Mode.CRAFTING ? "Recipe Viewer" : "Usage Viewer"));
@@ -171,6 +176,11 @@ public class RecipeViewerScreen extends Screen {
             String title = category.getTitle() != null ? category.getTitle().getString() : category.getId().getPath();
             ItemStack icon = category.getIcon() != null && !category.getIcon().isEmpty() ? category.getIcon() : new ItemStack(Items.FURNACE);
             tabs.add(new CategoryTab(category.getId().toString(), title, icon, entries.size(), category));
+        }
+
+        // 7. Information & Guide Tab (Captured from JEI / DEX plugins)
+        if (ItemInfoRegistry.getInstance().hasInfo(targetItem.getItem())) {
+            tabs.add(new CategoryTab("info", "ℹ Info", new ItemStack(Items.WRITABLE_BOOK), 1, null));
         }
 
         if (activeTabIndex >= tabs.size()) {
@@ -273,7 +283,7 @@ public class RecipeViewerScreen extends Screen {
         String currentTabId = currentTab.id;
 
         // 3. Navigation Buttons (< and >)
-        if (!"tree".equals(currentTabId) && currentTab.recipeCount > 1) {
+        if (!"tree".equals(currentTabId) && !"info".equals(currentTabId) && currentTab.recipeCount > 1) {
             // Previous recipe button
             this.addRenderableWidget(Button.builder(Component.literal("<"), b -> {
                 int cur = tabRecipeIndices.getOrDefault(currentTabId, 0);
@@ -293,9 +303,32 @@ public class RecipeViewerScreen extends Screen {
 
         // 4. Auto-transfer '+' button (for crafting table recipes)
         if ("crafting".equals(currentTabId) && recipesByCategory.containsKey("crafting") && !recipesByCategory.get("crafting").isEmpty()) {
-            this.addRenderableWidget(Button.builder(Component.literal("+"), b -> {
+            int cur = tabRecipeIndices.getOrDefault("crafting", 0);
+            List<RecipeHolder<?>> craftingList = recipesByCategory.get("crafting");
+            if (cur < 0 || cur >= craftingList.size()) cur = 0;
+            RecipeHolder<?> holder = craftingList.get(cur);
+
+            RecipeTransferHelper.InventoryCheckResult check = RecipeTransferHelper.checkInventory(holder.value());
+            Component buttonText = Component.literal("+").withStyle(check.allPresent() ? ChatFormatting.GREEN : ChatFormatting.RED);
+
+            StringBuilder tooltipSb = new StringBuilder();
+            if (check.allPresent()) {
+                tooltipSb.append("Transfer Recipe Ingredients\n[Shift-Click] Transfer max amount");
+            } else {
+                tooltipSb.append("Missing Ingredients:\n");
+                for (Map.Entry<Item, Integer> entry : check.missingQuantities().entrySet()) {
+                    tooltipSb.append("- ").append(new ItemStack(entry.getKey()).getHoverName().getString())
+                            .append(" x").append(entry.getValue()).append("\n");
+                }
+                tooltipSb.append("[Click] to try transfer anyway");
+            }
+
+            Button.Builder plusBuilder = Button.builder(buttonText, b -> {
                 transferRecipe();
-            }).bounds(guiLeft + guiWidth - 26, guiTop + guiHeight - 24, 18, 16).build());
+            }).bounds(guiLeft + guiWidth - 26, guiTop + guiHeight - 24, 18, 16);
+
+            plusBuilder.tooltip(Tooltip.create(Component.literal(tooltipSb.toString().trim())));
+            this.addRenderableWidget(plusBuilder.build());
         } else if ("tree".equals(currentTabId)) {
             // Multiplier buttons for tree calculator: [x1] [x4] [x16] [x64]
             int multX = guiLeft + 8;
@@ -317,35 +350,20 @@ public class RecipeViewerScreen extends Screen {
     }
 
     private void transferRecipe() {
-        Minecraft mc = Minecraft.getInstance();
         List<RecipeHolder<?>> craftingList = recipesByCategory.get("crafting");
-        if (craftingList == null || craftingList.isEmpty() || mc.player == null || mc.getConnection() == null) return;
+        if (craftingList == null || craftingList.isEmpty()) return;
 
         int cur = tabRecipeIndices.getOrDefault("crafting", 0);
         if (cur < 0 || cur >= craftingList.size()) cur = 0;
         RecipeHolder<?> holder = craftingList.get(cur);
 
-        if (mc.player.containerMenu != null) {
-            int containerId = mc.player.containerMenu.containerId;
-            boolean shift = Screen.hasShiftDown();
-
-            mc.getConnection().send(new ServerboundPlaceRecipePacket(containerId, holder, shift));
-            mc.player.displayClientMessage(
-                    Component.literal("DEX: Auto-filled recipe to crafting table!").withStyle(ChatFormatting.GREEN),
-                    true
-            );
-            mc.setScreen(previousScreen);
-        } else {
-            mc.player.displayClientMessage(
-                    Component.literal("DEX: Open a Crafting Table to auto-fill!").withStyle(ChatFormatting.RED),
-                    true
-            );
-        }
+        RecipeTransferHelper.executeTransfer(holder, previousScreen);
     }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         hoveredSlotItem = ItemStack.EMPTY;
+        hoveredSlotIsMissing = false;
 
         // 1. Background Box (Dark Modern Slate Glassmorphism)
         graphics.fill(guiLeft, guiTop, guiLeft + guiWidth, guiTop + guiHeight, 0xF018181E);
@@ -379,6 +397,7 @@ public class RecipeViewerScreen extends Screen {
                 case "trading" -> renderTradingView(graphics, currentIdx, mouseX, mouseY);
                 case "drops" -> renderMobDropsView(graphics, currentIdx, mouseX, mouseY);
                 case "tree" -> renderTreeView(graphics, mouseX, mouseY);
+                case "info" -> renderInfoView(graphics, mouseX, mouseY);
                 default -> {
                     if (recipesByCategory.containsKey(activeTab.id)) {
                         renderRecipesView(graphics, activeTab.id, currentIdx, mouseX, mouseY);
@@ -396,7 +415,14 @@ public class RecipeViewerScreen extends Screen {
 
         // 5. Render Tooltips at the very top layer
         if (!hoveredSlotItem.isEmpty()) {
-            graphics.renderTooltip(font, hoveredSlotItem, mouseX, mouseY);
+            if (hoveredSlotIsMissing && DEXConfig.get().isHighlightMissingIngredients()) {
+                Minecraft mc = Minecraft.getInstance();
+                List<Component> tooltipLines = new ArrayList<>(getTooltipFromItem(mc, hoveredSlotItem));
+                tooltipLines.add(1, Component.literal("⚠ Missing from Inventory").withStyle(ChatFormatting.RED, ChatFormatting.ITALIC));
+                graphics.renderComponentTooltip(font, tooltipLines, mouseX, mouseY);
+            } else {
+                graphics.renderTooltip(font, hoveredSlotItem, mouseX, mouseY);
+            }
         }
     }
 
@@ -436,6 +462,8 @@ public class RecipeViewerScreen extends Screen {
 
         List<Ingredient> ingredients = RecipeIngredientHelper.getIngredients(recipe);
         RecipeIngredientHelper.RecipeCategoryInfo catInfo = RecipeIngredientHelper.getCategoryInfo(holder);
+        RecipeTransferHelper.InventoryCheckResult check = DEXConfig.get().isHighlightMissingIngredients() ?
+                RecipeTransferHelper.checkInventory(recipe) : null;
 
         if (recipe instanceof CraftingRecipe) {
             // Crafting Table 3x3 Grid
@@ -458,7 +486,11 @@ public class RecipeViewerScreen extends Screen {
 
                     if (ingIdx < ingredients.size()) {
                         Ingredient ing = ingredients.get(ingIdx);
-                        renderIngredient(graphics, ing, slotX + 1, slotY + 1, mouseX, mouseY);
+                        boolean isMissing = check != null && check.missingSlotIndices().contains(ingIdx);
+                        renderIngredient(graphics, ing, slotX + 1, slotY + 1, mouseX, mouseY, isMissing);
+                        if (isMissing) {
+                            graphics.fill(slotX + 1, slotY + 1, slotX + 17, slotY + 17, 0x55FF3333);
+                        }
                         ingIdx++;
                     }
                 }
@@ -481,7 +513,11 @@ public class RecipeViewerScreen extends Screen {
             int inY = centerY - 10;
             drawSlot(graphics, inX, inY);
             if (!ingredients.isEmpty()) {
-                renderIngredient(graphics, ingredients.get(0), inX + 1, inY + 1, mouseX, mouseY);
+                boolean isMissing = check != null && check.missingSlotIndices().contains(0);
+                renderIngredient(graphics, ingredients.get(0), inX + 1, inY + 1, mouseX, mouseY, isMissing);
+                if (isMissing) {
+                    graphics.fill(inX + 1, inY + 1, inX + 17, inY + 17, 0x55FF3333);
+                }
             }
 
             graphics.drawString(font, "♨", centerX - 20, centerY - 6, 0xFFFF5555);
@@ -509,9 +545,21 @@ public class RecipeViewerScreen extends Screen {
             drawSlot(graphics, bX, centerY - 10);
             drawSlot(graphics, aX, centerY - 10);
 
-            if (ingredients.size() >= 1) renderIngredient(graphics, ingredients.get(0), tX + 1, centerY - 9, mouseX, mouseY);
-            if (ingredients.size() >= 2) renderIngredient(graphics, ingredients.get(1), bX + 1, centerY - 9, mouseX, mouseY);
-            if (ingredients.size() >= 3) renderIngredient(graphics, ingredients.get(2), aX + 1, centerY - 9, mouseX, mouseY);
+            if (ingredients.size() >= 1) {
+                boolean isMissing = check != null && check.missingSlotIndices().contains(0);
+                renderIngredient(graphics, ingredients.get(0), tX + 1, centerY - 9, mouseX, mouseY, isMissing);
+                if (isMissing) graphics.fill(tX + 1, centerY - 9, tX + 17, centerY + 7, 0x55FF3333);
+            }
+            if (ingredients.size() >= 2) {
+                boolean isMissing = check != null && check.missingSlotIndices().contains(1);
+                renderIngredient(graphics, ingredients.get(1), bX + 1, centerY - 9, mouseX, mouseY, isMissing);
+                if (isMissing) graphics.fill(bX + 1, centerY - 9, bX + 17, centerY + 7, 0x55FF3333);
+            }
+            if (ingredients.size() >= 3) {
+                boolean isMissing = check != null && check.missingSlotIndices().contains(2);
+                renderIngredient(graphics, ingredients.get(2), aX + 1, centerY - 9, mouseX, mouseY, isMissing);
+                if (isMissing) graphics.fill(aX + 1, centerY - 9, aX + 17, centerY + 7, 0x55FF3333);
+            }
 
             graphics.drawString(font, "🔨➔", centerX - 4, centerY - 6, 0xFFFFAA00);
 
@@ -532,9 +580,17 @@ public class RecipeViewerScreen extends Screen {
             drawSlot(graphics, bX, centerY - 10);
             drawSlot(graphics, aX, centerY - 10);
 
-            if (!ingredients.isEmpty()) renderIngredient(graphics, ingredients.get(0), bX + 1, centerY - 9, mouseX, mouseY);
+            if (!ingredients.isEmpty()) {
+                boolean isMissing = check != null && check.missingSlotIndices().contains(0);
+                renderIngredient(graphics, ingredients.get(0), bX + 1, centerY - 9, mouseX, mouseY, isMissing);
+                if (isMissing) graphics.fill(bX + 1, centerY - 9, bX + 17, centerY + 7, 0x55FF3333);
+            }
             graphics.drawString(font, "+", centerX - 37, centerY - 5, 0xFFFFAA00);
-            if (ingredients.size() >= 2) renderIngredient(graphics, ingredients.get(1), aX + 1, centerY - 9, mouseX, mouseY);
+            if (ingredients.size() >= 2) {
+                boolean isMissing = check != null && check.missingSlotIndices().contains(1);
+                renderIngredient(graphics, ingredients.get(1), aX + 1, centerY - 9, mouseX, mouseY, isMissing);
+                if (isMissing) graphics.fill(aX + 1, centerY - 9, aX + 17, centerY + 7, 0x55FF3333);
+            }
 
             graphics.drawString(font, "➔", centerX - 8, centerY - 6, 0xFFFFFFFF);
 
@@ -554,7 +610,9 @@ public class RecipeViewerScreen extends Screen {
             int inY = centerY - 10;
             drawSlot(graphics, inX, inY);
             if (!ingredients.isEmpty()) {
-                renderIngredient(graphics, ingredients.get(0), inX + 1, inY + 1, mouseX, mouseY);
+                boolean isMissing = check != null && check.missingSlotIndices().contains(0);
+                renderIngredient(graphics, ingredients.get(0), inX + 1, inY + 1, mouseX, mouseY, isMissing);
+                if (isMissing) graphics.fill(inX + 1, inY + 1, inX + 17, inY + 17, 0x55FF3333);
             }
 
             graphics.drawString(font, "🪚➔", centerX - 12, centerY - 6, 0xFFFFFFFF);
@@ -577,7 +635,9 @@ public class RecipeViewerScreen extends Screen {
                 int inY = centerY - 10;
                 drawSlot(graphics, inX, inY);
                 if (!ingredients.isEmpty()) {
-                    renderIngredient(graphics, ingredients.get(0), inX + 1, inY + 1, mouseX, mouseY);
+                    boolean isMissing = check != null && check.missingSlotIndices().contains(0);
+                    renderIngredient(graphics, ingredients.get(0), inX + 1, inY + 1, mouseX, mouseY, isMissing);
+                    if (isMissing) graphics.fill(inX + 1, inY + 1, inX + 17, inY + 17, 0x55FF3333);
                 }
 
                 graphics.drawString(font, "➔", centerX - 4, centerY - 6, 0xFFFFFFFF);
@@ -602,7 +662,9 @@ public class RecipeViewerScreen extends Screen {
                     int sx = startX + (c * 18);
                     int sy = startY + (r * 18);
                     drawSlot(graphics, sx, sy);
-                    renderIngredient(graphics, ingredients.get(i), sx + 1, sy + 1, mouseX, mouseY);
+                    boolean isMissing = check != null && check.missingSlotIndices().contains(i);
+                    renderIngredient(graphics, ingredients.get(i), sx + 1, sy + 1, mouseX, mouseY, isMissing);
+                    if (isMissing) graphics.fill(sx + 1, sy + 1, sx + 17, sy + 17, 0x55FF3333);
                 }
 
                 graphics.drawString(font, "➔", centerX - 4, centerY - 6, 0xFFFFFFFF);
@@ -858,6 +920,10 @@ public class RecipeViewerScreen extends Screen {
     }
 
     private void renderIngredient(GuiGraphics graphics, Ingredient ingredient, int x, int y, int mouseX, int mouseY) {
+        renderIngredient(graphics, ingredient, x, y, mouseX, mouseY, false);
+    }
+
+    private void renderIngredient(GuiGraphics graphics, Ingredient ingredient, int x, int y, int mouseX, int mouseY, boolean isMissing) {
         if (ingredient == null || ingredient.isEmpty()) return;
         ItemStack[] items = ingredient.getItems();
         if (items.length == 0) return;
@@ -867,12 +933,63 @@ public class RecipeViewerScreen extends Screen {
 
         graphics.renderItem(stack, x, y);
         graphics.renderItemDecorations(font, stack, x, y);
-        checkSlotHover(stack, x, y, mouseX, mouseY);
+        checkSlotHover(stack, x, y, mouseX, mouseY, isMissing);
     }
 
     private void checkSlotHover(ItemStack stack, int x, int y, int mouseX, int mouseY) {
+        checkSlotHover(stack, x, y, mouseX, mouseY, false);
+    }
+
+    private void checkSlotHover(ItemStack stack, int x, int y, int mouseX, int mouseY, boolean isMissing) {
         if (mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16) {
             this.hoveredSlotItem = stack;
+            this.hoveredSlotIsMissing = isMissing;
+        }
+    }
+
+    private void renderInfoView(GuiGraphics graphics, int mouseX, int mouseY) {
+        int startX = guiLeft + 16;
+        int startY = guiTop + 45;
+
+        // 1. Header with icon and item title
+        drawSlot(graphics, startX, startY);
+        graphics.renderItem(targetItem, startX + 1, startY + 1);
+        graphics.renderItemDecorations(font, targetItem, startX + 1, startY + 1);
+        checkSlotHover(targetItem, startX + 1, startY + 1, mouseX, mouseY, false);
+
+        graphics.drawString(font, targetItem.getHoverName().getString(), startX + 24, startY + 5, 0xFFFFAA00);
+
+        // 2. Info container box
+        int boxX = startX;
+        int boxY = startY + 24;
+        int boxWidth = guiWidth - 32;
+        int boxHeight = guiHeight - 78;
+        graphics.fill(boxX, boxY, boxX + boxWidth, boxY + boxHeight, 0x40101018);
+        graphics.renderOutline(boxX, boxY, boxWidth, boxHeight, 0xFF3E3E50);
+
+        // 3. Information lines
+        List<Component> descriptions = ItemInfoRegistry.getInstance().getInfo(targetItem.getItem());
+        int textY = boxY + 8;
+        int textX = boxX + 8;
+        int maxTextWidth = boxWidth - 16;
+
+        if (descriptions.isEmpty()) {
+            graphics.drawString(font, "No additional guide available for this item.", textX, textY, 0xFF888888);
+            return;
+        }
+
+        for (Component desc : descriptions) {
+            List<net.minecraft.util.FormattedCharSequence> lines = font.split(desc, maxTextWidth);
+            for (net.minecraft.util.FormattedCharSequence line : lines) {
+                if (textY + 10 > boxY + boxHeight - 6) {
+                    graphics.drawString(font, "...", textX, textY, 0xFF888888);
+                    break;
+                }
+                graphics.drawString(font, line, textX, textY, 0xFFE0E0E0);
+                textY += 11;
+            }
+            textY += 4;
+            if (textY + 10 > boxY + boxHeight - 6) break;
         }
     }
 
