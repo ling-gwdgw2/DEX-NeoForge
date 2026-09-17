@@ -66,7 +66,7 @@ public class CraftingTreeCalculator {
         CraftingTreeNode node = new CraftingTreeNode(stack, count, false);
         visited.add(item);
 
-        NonNullList<Ingredient> ingredients = recipe.getIngredients();
+        List<Ingredient> ingredients = com.dex.recipe.RecipeIngredientHelper.getIngredients(recipe);
         // Consolidate ingredient counts for this craft
         Map<Item, Integer> ingredientQuantities = new LinkedHashMap<>();
         Map<Item, ItemStack> sampleStacks = new HashMap<>();

@@ -72,6 +72,7 @@ c:/Users/vivo9/Desktop/Minecraft my mod/dex-neoforge-1.21.1/src/main/java/com/de
 │   └── ModInfo.java                          # โมเดลข้อมูลของแต่ละ Mod
 ├── recipe/                                   # ระบบจัดทำดัชนีสูตรคราฟต์
 │   ├── RecipeIndexManager.java               # Indexer สูตรมาตรฐาน O(1) Lookup
+│   ├── RecipeIngredientHelper.java           # ตัวดึงวัตถุดิบและจำแนกหมวดหมู่สูตร (Smithing/Fusion/Custom)
 │   ├── tree/                                 # เครื่องคำนวณแตกกิ่งวัตถุดิบ
 │   │   ├── CraftingTreeCalculator.java       # เอนจินคำนวณ Recursive Tree
 │   │   └── CraftingTreeNode.java             # Node โครงสร้างต้นไม้วัตถุดิบ

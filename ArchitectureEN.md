@@ -72,6 +72,7 @@ c:/Users/vivo9/Desktop/Minecraft my mod/dex-neoforge-1.21.1/src/main/java/com/de
 │   └── ModInfo.java                          # Mod metadata model (name, ID, icon, items)
 ├── recipe/                                   # Recipe Indexing & Lookup
 │   ├── RecipeIndexManager.java               # O(1) Reverse Recipe Indexer (Output/Input maps)
+│   ├── RecipeIngredientHelper.java           # Universal ingredient extractor & workstation classifier
 │   ├── tree/                                 # Raw Material Calculator
 │   │   ├── CraftingTreeCalculator.java       # Recursive decomposition engine
 │   │   └── CraftingTreeNode.java             # Tree data structure

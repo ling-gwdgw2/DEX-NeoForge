@@ -49,7 +49,7 @@ public class RecipeIndexManager {
                 }
 
                 // 2. Ingredients / Inputs
-                for (Ingredient ingredient : recipe.getIngredients()) {
+                for (Ingredient ingredient : RecipeIngredientHelper.getIngredients(recipe)) {
                     if (ingredient == null || ingredient.isEmpty()) continue;
                     for (ItemStack inputStack : ingredient.getItems()) {
                         if (inputStack != null && !inputStack.isEmpty()) {

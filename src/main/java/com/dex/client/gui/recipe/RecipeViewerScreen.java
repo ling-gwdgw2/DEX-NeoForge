@@ -8,6 +8,7 @@ import com.dex.client.bookmark.BookmarkManager;
 import com.dex.plugin.DexPluginManager;
 import com.dex.plugin.DexRegistriesImpl;
 import com.dex.recipe.RecipeIndexManager;
+import com.dex.recipe.RecipeIngredientHelper;
 import com.dex.recipe.brewing.BrewingIndexManager;
 import com.dex.recipe.brewing.BrewingRecipeEntry;
 import com.dex.recipe.drops.MobDropEntry;
@@ -22,7 +23,6 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.core.NonNullList;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundPlaceRecipePacket;
 import net.minecraft.resources.ResourceLocation;
@@ -62,7 +62,10 @@ public class RecipeViewerScreen extends Screen {
     private final ItemStack targetItem;
     private final Mode mode;
 
-    private final List<RecipeHolder<?>> recipes;
+    private final List<RecipeHolder<?>> allHolders;
+    private final Map<String, List<RecipeHolder<?>>> recipesByCategory = new LinkedHashMap<>();
+    private final Map<String, RecipeIngredientHelper.RecipeCategoryInfo> categoryMeta = new LinkedHashMap<>();
+
     private final List<BrewingRecipeEntry> brewingRecipes;
     private final List<VillagerTradeEntry> villagerTrades;
     private final List<MobDropEntry> mobDrops;
@@ -90,7 +93,7 @@ public class RecipeViewerScreen extends Screen {
         this.mode = mode;
 
         if (mode == Mode.CRAFTING) {
-            this.recipes = new ArrayList<>(RecipeIndexManager.getInstance().getRecipesFor(targetItem));
+            this.allHolders = new ArrayList<>(RecipeIndexManager.getInstance().getRecipesFor(targetItem));
             this.brewingRecipes = new ArrayList<>(BrewingIndexManager.getInstance().getRecipesFor(targetItem));
             this.villagerTrades = new ArrayList<>(VillagerTradeIndexManager.getInstance().getTradesSelling(targetItem));
             this.mobDrops = new ArrayList<>(MobDropIndexManager.getInstance().getDropsFor(targetItem));
@@ -101,7 +104,7 @@ public class RecipeViewerScreen extends Screen {
                 this.customCategories.computeIfAbsent(entry.category(), k -> new ArrayList<>()).add(entry);
             }
         } else {
-            this.recipes = new ArrayList<>(RecipeIndexManager.getInstance().getUsagesFor(targetItem));
+            this.allHolders = new ArrayList<>(RecipeIndexManager.getInstance().getUsagesFor(targetItem));
             this.brewingRecipes = new ArrayList<>(BrewingIndexManager.getInstance().getUsagesFor(targetItem));
             this.villagerTrades = new ArrayList<>(VillagerTradeIndexManager.getInstance().getTradesBuying(targetItem));
             this.mobDrops = new ArrayList<>();
@@ -113,6 +116,13 @@ public class RecipeViewerScreen extends Screen {
             }
         }
 
+        // Group standard and modded RecipeManager recipes by workstation category
+        for (RecipeHolder<?> holder : allHolders) {
+            RecipeIngredientHelper.RecipeCategoryInfo info = RecipeIngredientHelper.getCategoryInfo(holder);
+            recipesByCategory.computeIfAbsent(info.id(), k -> new ArrayList<>()).add(holder);
+            categoryMeta.putIfAbsent(info.id(), info);
+        }
+
         buildTabs();
         this.cachedTree = CraftingTreeCalculator.calculateTree(targetItem, treeMultiplier);
     }
@@ -120,9 +130,18 @@ public class RecipeViewerScreen extends Screen {
     private void buildTabs() {
         tabs.clear();
 
-        // 1. Vanilla / Crafting Tab
-        if (!recipes.isEmpty() || (brewingRecipes.isEmpty() && villagerTrades.isEmpty() && mobDrops.isEmpty() && customCategories.isEmpty())) {
-            tabs.add(new CategoryTab("recipes", "Crafting", new ItemStack(Items.CRAFTING_TABLE), recipes.size(), null));
+        // 1. Workstation & Recipe Category Tabs
+        for (Map.Entry<String, List<RecipeHolder<?>>> entry : recipesByCategory.entrySet()) {
+            String catId = entry.getKey();
+            List<RecipeHolder<?>> list = entry.getValue();
+            RecipeIngredientHelper.RecipeCategoryInfo info = categoryMeta.get(catId);
+            String title = info != null ? info.title().getString() : catId;
+            ItemStack icon = info != null ? info.icon() : new ItemStack(Items.CRAFTING_TABLE);
+            tabs.add(new CategoryTab(catId, title, icon, list.size(), null));
+        }
+
+        if (tabs.isEmpty() && brewingRecipes.isEmpty() && villagerTrades.isEmpty() && mobDrops.isEmpty() && customCategories.isEmpty()) {
+            tabs.add(new CategoryTab("crafting", "Crafting", new ItemStack(Items.CRAFTING_TABLE), 0, null));
         }
 
         // 2. Brewing Tab
@@ -141,7 +160,7 @@ public class RecipeViewerScreen extends Screen {
         }
 
         // 5. Crafting Tree Tab
-        if (mode == Mode.CRAFTING && !recipes.isEmpty()) {
+        if (mode == Mode.CRAFTING && !allHolders.isEmpty()) {
             tabs.add(new CategoryTab("tree", "🌳 Tree", new ItemStack(Items.OAK_SAPLING), 1, null));
         }
 
@@ -160,7 +179,7 @@ public class RecipeViewerScreen extends Screen {
     }
 
     public HistoryEntry saveState() {
-        String tabId = !tabs.isEmpty() ? tabs.get(activeTabIndex).id : "recipes";
+        String tabId = !tabs.isEmpty() ? tabs.get(activeTabIndex).id : "crafting";
         int currentIdx = tabRecipeIndices.getOrDefault(tabId, 0);
         return new HistoryEntry(targetItem, mode, tabId, currentIdx);
     }
@@ -217,14 +236,14 @@ public class RecipeViewerScreen extends Screen {
     private void rebuildCategoryButtons() {
         this.clearWidgets();
 
-        // 1. Back Button
+        // 1. Back Button (Left side of Row 1)
         if (!HISTORY.isEmpty()) {
             this.addRenderableWidget(Button.builder(Component.literal("⮌ Back"), b -> goBack())
-                    .bounds(guiLeft + 6, guiTop + 4, 48, 14).build());
+                    .bounds(guiLeft + 6, guiTop + 5, 44, 14).build());
         }
 
-        // 2. Category Tabs at Top
-        int tabX = guiLeft + (!HISTORY.isEmpty() ? 58 : 8);
+        // 2. Category Tabs at Dedicated Row 2 (y = guiTop + 22)
+        int tabX = guiLeft + 8;
         int tabY = guiTop + 22;
         int tabHeight = 16;
 
@@ -252,7 +271,6 @@ public class RecipeViewerScreen extends Screen {
         if (tabs.isEmpty()) return;
         CategoryTab currentTab = tabs.get(activeTabIndex);
         String currentTabId = currentTab.id;
-        int currentIndex = tabRecipeIndices.getOrDefault(currentTabId, 0);
 
         // 3. Navigation Buttons (< and >)
         if (!"tree".equals(currentTabId) && currentTab.recipeCount > 1) {
@@ -273,8 +291,8 @@ public class RecipeViewerScreen extends Screen {
             }).bounds(guiLeft + guiWidth - 26, guiTop + 42, 18, 16).build());
         }
 
-        // 4. Auto-transfer '+' button (only for vanilla crafting table recipes)
-        if ("recipes".equals(currentTabId) && !recipes.isEmpty()) {
+        // 4. Auto-transfer '+' button (for crafting table recipes)
+        if ("crafting".equals(currentTabId) && recipesByCategory.containsKey("crafting") && !recipesByCategory.get("crafting").isEmpty()) {
             this.addRenderableWidget(Button.builder(Component.literal("+"), b -> {
                 transferRecipe();
             }).bounds(guiLeft + guiWidth - 26, guiTop + guiHeight - 24, 18, 16).build());
@@ -300,11 +318,12 @@ public class RecipeViewerScreen extends Screen {
 
     private void transferRecipe() {
         Minecraft mc = Minecraft.getInstance();
-        if (recipes.isEmpty() || mc.player == null || mc.getConnection() == null) return;
+        List<RecipeHolder<?>> craftingList = recipesByCategory.get("crafting");
+        if (craftingList == null || craftingList.isEmpty() || mc.player == null || mc.getConnection() == null) return;
 
-        int cur = tabRecipeIndices.getOrDefault("recipes", 0);
-        if (cur < 0 || cur >= recipes.size()) cur = 0;
-        RecipeHolder<?> holder = recipes.get(cur);
+        int cur = tabRecipeIndices.getOrDefault("crafting", 0);
+        if (cur < 0 || cur >= craftingList.size()) cur = 0;
+        RecipeHolder<?> holder = craftingList.get(cur);
 
         if (mc.player.containerMenu != null) {
             int containerId = mc.player.containerMenu.containerId;
@@ -326,57 +345,73 @@ public class RecipeViewerScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        super.render(graphics, mouseX, mouseY, partialTick);
         hoveredSlotItem = ItemStack.EMPTY;
 
-        // Background Box (Dark Modern Slate Glassmorphism)
+        // 1. Background Box (Dark Modern Slate Glassmorphism)
         graphics.fill(guiLeft, guiTop, guiLeft + guiWidth, guiTop + guiHeight, 0xF018181E);
         graphics.renderOutline(guiLeft, guiTop, guiWidth, guiHeight, 0xFF4A4A5A);
 
-        // Header Title
-        String titleStr = (mode == Mode.CRAFTING ? "Crafting: " : "Usages of: ") + targetItem.getHoverName().getString();
-        int titleX = guiLeft + guiWidth / 2;
-        graphics.drawCenteredString(font, titleStr, titleX, guiTop + 7, 0xFFFFAA00);
+        // 2. Header Title (Safe Layout - Never Overlaps Back Button)
+        String prefix = (mode == Mode.CRAFTING ? "Recipe: " : "Usages: ");
+        String fullTitle = prefix + targetItem.getHoverName().getString();
 
+        int titleLeft = !HISTORY.isEmpty() ? (guiLeft + 54) : (guiLeft + 8);
+        int titleRight = guiLeft + guiWidth - 8;
+        int maxTitleWidth = titleRight - titleLeft - 4;
+
+        // Truncate title if it exceeds available space
+        String displayTitle = font.plainSubstrByWidth(fullTitle, maxTitleWidth);
+        if (displayTitle.length() < fullTitle.length()) {
+            displayTitle = font.plainSubstrByWidth(fullTitle, maxTitleWidth - 10) + "...";
+        }
+        int titleCenterX = titleLeft + (titleRight - titleLeft) / 2;
+        graphics.drawCenteredString(font, displayTitle, titleCenterX, guiTop + 8, 0xFFFFAA00);
+
+        // 3. Render Active Tab Content
         if (tabs.isEmpty()) {
             graphics.drawCenteredString(font, "No recipes found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
-            return;
-        }
+        } else {
+            CategoryTab activeTab = tabs.get(activeTabIndex);
+            int currentIdx = tabRecipeIndices.getOrDefault(activeTab.id, 0);
 
-        CategoryTab activeTab = tabs.get(activeTabIndex);
-        int currentIdx = tabRecipeIndices.getOrDefault(activeTab.id, 0);
-
-        switch (activeTab.id) {
-            case "recipes" -> renderRecipesView(graphics, currentIdx, mouseX, mouseY);
-            case "brewing" -> renderBrewingView(graphics, currentIdx, mouseX, mouseY);
-            case "trading" -> renderTradingView(graphics, currentIdx, mouseX, mouseY);
-            case "drops" -> renderMobDropsView(graphics, currentIdx, mouseX, mouseY);
-            case "tree" -> renderTreeView(graphics, mouseX, mouseY);
-            default -> {
-                if (activeTab.customCategory != null) {
-                    renderCustomCategoryView(graphics, activeTab.customCategory, currentIdx, mouseX, mouseY);
+            switch (activeTab.id) {
+                case "brewing" -> renderBrewingView(graphics, currentIdx, mouseX, mouseY);
+                case "trading" -> renderTradingView(graphics, currentIdx, mouseX, mouseY);
+                case "drops" -> renderMobDropsView(graphics, currentIdx, mouseX, mouseY);
+                case "tree" -> renderTreeView(graphics, mouseX, mouseY);
+                default -> {
+                    if (recipesByCategory.containsKey(activeTab.id)) {
+                        renderRecipesView(graphics, activeTab.id, currentIdx, mouseX, mouseY);
+                    } else if (activeTab.customCategory != null) {
+                        renderCustomCategoryView(graphics, activeTab.customCategory, currentIdx, mouseX, mouseY);
+                    } else {
+                        renderRecipesView(graphics, activeTab.id, currentIdx, mouseX, mouseY);
+                    }
                 }
             }
         }
 
-        // Render Tooltip for hovered slot item
+        // 4. Render Widgets (Buttons, Tabs) ON TOP of background
+        super.render(graphics, mouseX, mouseY, partialTick);
+
+        // 5. Render Tooltips at the very top layer
         if (!hoveredSlotItem.isEmpty()) {
             graphics.renderTooltip(font, hoveredSlotItem, mouseX, mouseY);
         }
     }
 
-    private void renderRecipesView(GuiGraphics graphics, int currentRecipeIndex, int mouseX, int mouseY) {
-        if (recipes.isEmpty()) {
+    private void renderRecipesView(GuiGraphics graphics, String categoryId, int currentRecipeIndex, int mouseX, int mouseY) {
+        List<RecipeHolder<?>> catRecipes = recipesByCategory.getOrDefault(categoryId, Collections.emptyList());
+        if (catRecipes.isEmpty()) {
             graphics.drawCenteredString(font, "No recipes found for this item.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
             return;
         }
 
-        if (currentRecipeIndex >= recipes.size()) currentRecipeIndex = 0;
-        RecipeHolder<?> currentHolder = recipes.get(currentRecipeIndex);
-        Recipe<?> recipe = currentHolder.value();
+        if (currentRecipeIndex >= catRecipes.size()) currentRecipeIndex = 0;
+        RecipeHolder<?> currentHolder = catRecipes.get(currentRecipeIndex);
         ResourceLocation recipeId = currentHolder.id();
 
-        String pageInfo = "Recipe " + (currentRecipeIndex + 1) + " of " + recipes.size();
+        String pageInfo = "Recipe " + (currentRecipeIndex + 1) + " of " + catRecipes.size();
         graphics.drawCenteredString(font, pageInfo, guiLeft + guiWidth / 2, guiTop + 45, 0xFFFFFFFF);
 
         String namespace = recipeId.getNamespace();
@@ -385,16 +420,22 @@ public class RecipeViewerScreen extends Screen {
         graphics.drawCenteredString(font, "Mod: " + modName + " (" + recipeId.getPath() + ")",
                 guiLeft + guiWidth / 2, guiTop + 58, 0xFF88AAFF);
 
-        renderRecipeBody(graphics, recipe, mouseX, mouseY);
+        renderRecipeBody(graphics, currentHolder, mouseX, mouseY);
     }
 
-    private void renderRecipeBody(GuiGraphics graphics, Recipe<?> recipe, int mouseX, int mouseY) {
+    private void renderRecipeBody(GuiGraphics graphics, RecipeHolder<?> holder, int mouseX, int mouseY) {
         Minecraft mc = Minecraft.getInstance();
         int centerX = guiLeft + guiWidth / 2;
         int centerY = guiTop + 115;
 
+        Recipe<?> recipe = holder.value();
         ItemStack output = recipe.getResultItem(mc.level != null ? mc.level.registryAccess() : null);
-        NonNullList<Ingredient> ingredients = recipe.getIngredients();
+        if (output.isEmpty()) {
+            output = targetItem.copy();
+        }
+
+        List<Ingredient> ingredients = RecipeIngredientHelper.getIngredients(recipe);
+        RecipeIngredientHelper.RecipeCategoryInfo catInfo = RecipeIngredientHelper.getCategoryInfo(holder);
 
         if (recipe instanceof CraftingRecipe) {
             // Crafting Table 3x3 Grid
@@ -458,7 +499,7 @@ public class RecipeViewerScreen extends Screen {
             String info = (cooking.getCookingTime() / 20) + "s (" + cooking.getExperience() + " XP)";
             graphics.drawCenteredString(font, info, centerX, centerY + 24, 0xFFAAAAAA);
 
-        } else if (recipe instanceof SmithingRecipe) {
+        } else if (catInfo.kind() == RecipeIngredientHelper.WorkstationKind.SMITHING_TABLE) {
             // Smithing Table: Template + Base + Addition -> Result
             int tX = centerX - 70;
             int bX = centerX - 48;
@@ -483,8 +524,32 @@ public class RecipeViewerScreen extends Screen {
             }
             graphics.drawCenteredString(font, "Smithing Table Upgrade", centerX, centerY + 24, 0xFFAAAAAA);
 
-        } else {
-            // Generic Fallback
+        } else if (catInfo.kind() == RecipeIngredientHelper.WorkstationKind.FUSION_ANVIL || ingredients.size() == 2) {
+            // 2-Input Fusion / Anvil
+            int bX = centerX - 58;
+            int aX = centerX - 28;
+
+            drawSlot(graphics, bX, centerY - 10);
+            drawSlot(graphics, aX, centerY - 10);
+
+            if (!ingredients.isEmpty()) renderIngredient(graphics, ingredients.get(0), bX + 1, centerY - 9, mouseX, mouseY);
+            graphics.drawString(font, "+", centerX - 37, centerY - 5, 0xFFFFAA00);
+            if (ingredients.size() >= 2) renderIngredient(graphics, ingredients.get(1), aX + 1, centerY - 9, mouseX, mouseY);
+
+            graphics.drawString(font, "➔", centerX - 8, centerY - 6, 0xFFFFFFFF);
+
+            int outX = centerX + 26;
+            drawSlot(graphics, outX, centerY - 10);
+            if (!output.isEmpty()) {
+                graphics.renderItem(output, outX + 1, centerY - 9);
+                graphics.renderItemDecorations(font, output, outX + 1, centerY - 9);
+                checkSlotHover(output, outX + 1, centerY - 9, mouseX, mouseY);
+            }
+            String title = catInfo.title().getString();
+            graphics.drawCenteredString(font, title, centerX, centerY + 24, 0xFFAAAAAA);
+
+        } else if (catInfo.kind() == RecipeIngredientHelper.WorkstationKind.STONECUTTER || recipe instanceof StonecutterRecipe) {
+            // Stonecutter
             int inX = centerX - 50;
             int inY = centerY - 10;
             drawSlot(graphics, inX, inY);
@@ -492,7 +557,7 @@ public class RecipeViewerScreen extends Screen {
                 renderIngredient(graphics, ingredients.get(0), inX + 1, inY + 1, mouseX, mouseY);
             }
 
-            graphics.drawString(font, "➔", centerX - 4, centerY - 6, 0xFFFFFFFF);
+            graphics.drawString(font, "🪚➔", centerX - 12, centerY - 6, 0xFFFFFFFF);
 
             int outX = centerX + 24;
             int outY = centerY - 10;
@@ -501,6 +566,55 @@ public class RecipeViewerScreen extends Screen {
                 graphics.renderItem(output, outX + 1, outY + 1);
                 graphics.renderItemDecorations(font, output, outX + 1, outY + 1);
                 checkSlotHover(output, outX + 1, outY + 1, mouseX, mouseY);
+            }
+            graphics.drawCenteredString(font, "Stonecutter", centerX, centerY + 24, 0xFFAAAAAA);
+
+        } else {
+            // Generic Multi-Input Fallback
+            int ingCount = ingredients.size();
+            if (ingCount <= 1) {
+                int inX = centerX - 50;
+                int inY = centerY - 10;
+                drawSlot(graphics, inX, inY);
+                if (!ingredients.isEmpty()) {
+                    renderIngredient(graphics, ingredients.get(0), inX + 1, inY + 1, mouseX, mouseY);
+                }
+
+                graphics.drawString(font, "➔", centerX - 4, centerY - 6, 0xFFFFFFFF);
+
+                int outX = centerX + 24;
+                int outY = centerY - 10;
+                drawSlot(graphics, outX, outY);
+                if (!output.isEmpty()) {
+                    graphics.renderItem(output, outX + 1, outY + 1);
+                    graphics.renderItemDecorations(font, output, outX + 1, outY + 1);
+                    checkSlotHover(output, outX + 1, outY + 1, mouseX, mouseY);
+                }
+            } else {
+                int cols = Math.min(3, ingCount);
+                int rows = (ingCount + cols - 1) / cols;
+                int startX = centerX - (cols * 19) - 10;
+                int startY = centerY - (rows * 10);
+
+                for (int i = 0; i < ingCount; i++) {
+                    int c = i % cols;
+                    int r = i / cols;
+                    int sx = startX + (c * 18);
+                    int sy = startY + (r * 18);
+                    drawSlot(graphics, sx, sy);
+                    renderIngredient(graphics, ingredients.get(i), sx + 1, sy + 1, mouseX, mouseY);
+                }
+
+                graphics.drawString(font, "➔", centerX - 4, centerY - 6, 0xFFFFFFFF);
+
+                int outX = centerX + 24;
+                int outY = centerY - 10;
+                drawSlot(graphics, outX, outY);
+                if (!output.isEmpty()) {
+                    graphics.renderItem(output, outX + 1, outY + 1);
+                    graphics.renderItemDecorations(font, output, outX + 1, outY + 1);
+                    checkSlotHover(output, outX + 1, outY + 1, mouseX, mouseY);
+                }
             }
         }
     }
@@ -519,47 +633,39 @@ public class RecipeViewerScreen extends Screen {
         String pageInfo = "Brewing " + (currentBrewingIndex + 1) + " of " + brewingRecipes.size();
         graphics.drawCenteredString(font, pageInfo, guiLeft + guiWidth / 2, guiTop + 45, 0xFFFFFFFF);
 
-        // Top: Ingredient Slot
-        int ingX = centerX - 9;
-        int ingY = centerY - 38;
+        // Input Potion (Left)
+        int inX = centerX - 54;
+        int inY = centerY - 10;
+        drawSlot(graphics, inX, inY);
+        graphics.renderItem(entry.getInput(), inX + 1, inY + 1);
+        graphics.renderItemDecorations(font, entry.getInput(), inX + 1, inY + 1);
+        checkSlotHover(entry.getInput(), inX + 1, inY + 1, mouseX, mouseY);
+
+        // Brewing Ingredient (Top-Center)
+        int ingX = centerX - 8;
+        int ingY = centerY - 28;
         drawSlot(graphics, ingX, ingY);
         graphics.renderItem(entry.getIngredient(), ingX + 1, ingY + 1);
         graphics.renderItemDecorations(font, entry.getIngredient(), ingX + 1, ingY + 1);
         checkSlotHover(entry.getIngredient(), ingX + 1, ingY + 1, mouseX, mouseY);
 
-        graphics.drawCenteredString(font, "⚗ ⬇", centerX, centerY - 16, 0xFFE0E0E0);
+        // Brewing Stand Symbol
+        graphics.drawString(font, "⚗➔", centerX - 6, centerY - 6, 0xFFFFAA00);
 
-        // Bottom: 3 Input Bottle Slots
-        int b1 = centerX - 36;
-        int b2 = centerX - 9;
-        int b3 = centerX + 18;
-        int botY = centerY;
+        // Output Potion (Right)
+        int outX = centerX + 34;
+        int outY = centerY - 10;
+        drawSlot(graphics, outX, outY);
+        graphics.renderItem(entry.getOutput(), outX + 1, outY + 1);
+        graphics.renderItemDecorations(font, entry.getOutput(), outX + 1, outY + 1);
+        checkSlotHover(entry.getOutput(), outX + 1, outY + 1, mouseX, mouseY);
 
-        drawSlot(graphics, b1, botY);
-        drawSlot(graphics, b2, botY);
-        drawSlot(graphics, b3, botY);
-
-        graphics.renderItem(entry.getInput(), b1 + 1, botY + 1);
-        graphics.renderItem(entry.getInput(), b2 + 1, botY + 1);
-        graphics.renderItem(entry.getInput(), b3 + 1, botY + 1);
-        checkSlotHover(entry.getInput(), b1 + 1, botY + 1, mouseX, mouseY);
-
-        // Arrow to Result
-        graphics.drawString(font, "➔", centerX + 44, centerY + 4, 0xFFFFFFFF);
-
-        // Output Slot
-        int outX = centerX + 62;
-        drawSlot(graphics, outX, botY);
-        graphics.renderItem(entry.getOutput(), outX + 1, botY + 1);
-        graphics.renderItemDecorations(font, entry.getOutput(), outX + 1, botY + 1);
-        checkSlotHover(entry.getOutput(), outX + 1, botY + 1, mouseX, mouseY);
-
-        graphics.drawCenteredString(font, "Brewing Stand Recipe", centerX, centerY + 30, 0xFFAAAAAA);
+        graphics.drawCenteredString(font, "Brewing Stand Recipe", centerX, centerY + 24, 0xFFAAAAAA);
     }
 
     private void renderTradingView(GuiGraphics graphics, int currentTradeIndex, int mouseX, int mouseY) {
         if (villagerTrades.isEmpty()) {
-            graphics.drawCenteredString(font, "No trading offers found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
+            graphics.drawCenteredString(font, "No villager trades found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
             return;
         }
 
@@ -571,133 +677,72 @@ public class RecipeViewerScreen extends Screen {
         String pageInfo = "Trade " + (currentTradeIndex + 1) + " of " + villagerTrades.size();
         graphics.drawCenteredString(font, pageInfo, guiLeft + guiWidth / 2, guiTop + 45, 0xFFFFFFFF);
 
-        String info = trade.getProfession() + " - " + trade.getLevelName();
-        graphics.drawCenteredString(font, info, guiLeft + guiWidth / 2, guiTop + 60, 0xFFFFAA00);
+        // Villager profession & level info
+        String profName = trade.getProfession() + " (" + trade.getLevelName() + " - Lvl " + trade.getLevel() + ")";
+        graphics.drawCenteredString(font, profName, guiLeft + guiWidth / 2, guiTop + 58, 0xFF55FF55);
 
-        // Cost A Slot
-        int c1X = centerX - 58;
-        drawSlot(graphics, c1X, centerY - 10);
-        graphics.renderItem(trade.getCostA(), c1X + 1, centerY - 9);
-        graphics.renderItemDecorations(font, trade.getCostA(), c1X + 1, centerY - 9);
-        checkSlotHover(trade.getCostA(), c1X + 1, centerY - 9, mouseX, mouseY);
+        // Cost A
+        int costAX = centerX - 60;
+        drawSlot(graphics, costAX, centerY - 10);
+        graphics.renderItem(trade.getCostA(), costAX + 1, centerY - 9);
+        graphics.renderItemDecorations(font, trade.getCostA(), costAX + 1, centerY - 9);
+        checkSlotHover(trade.getCostA(), costAX + 1, centerY - 9, mouseX, mouseY);
 
-        // Cost B Slot (optional)
-        int c2X = centerX - 34;
+        // Cost B (Optional)
+        int costBX = centerX - 36;
         if (!trade.getCostB().isEmpty()) {
-            drawSlot(graphics, c2X, centerY - 10);
-            graphics.renderItem(trade.getCostB(), c2X + 1, centerY - 9);
-            graphics.renderItemDecorations(font, trade.getCostB(), c2X + 1, centerY - 9);
-            checkSlotHover(trade.getCostB(), c2X + 1, centerY - 9, mouseX, mouseY);
+            drawSlot(graphics, costBX, centerY - 10);
+            graphics.renderItem(trade.getCostB(), costBX + 1, centerY - 9);
+            graphics.renderItemDecorations(font, trade.getCostB(), costBX + 1, centerY - 9);
+            checkSlotHover(trade.getCostB(), costBX + 1, centerY - 9, mouseX, mouseY);
         }
 
-        graphics.drawString(font, "➔", centerX - 8, centerY - 6, 0xFFFFFFFF);
+        graphics.drawString(font, "➔", centerX - 12, centerY - 6, 0xFFFFFFFF);
 
-        // Result Slot
-        int resX = centerX + 20;
-        drawSlot(graphics, resX, centerY - 10);
-        graphics.renderItem(trade.getResult(), resX + 1, centerY - 9);
-        graphics.renderItemDecorations(font, trade.getResult(), resX + 1, centerY - 9);
-        checkSlotHover(trade.getResult(), resX + 1, centerY - 9, mouseX, mouseY);
+        // Result Item
+        int outX = centerX + 20;
+        drawSlot(graphics, outX, centerY - 10);
+        graphics.renderItem(trade.getResult(), outX + 1, centerY - 9);
+        graphics.renderItemDecorations(font, trade.getResult(), outX + 1, centerY - 9);
+        checkSlotHover(trade.getResult(), outX + 1, centerY - 9, mouseX, mouseY);
 
-        graphics.drawCenteredString(font, "Villager & Wandering Trader Offers", centerX, centerY + 26, 0xFFAAAAAA);
+        graphics.drawCenteredString(font, "Villager Trade Offer", centerX, centerY + 24, 0xFFAAAAAA);
     }
 
-    private void renderMobDropsView(GuiGraphics graphics, int currentMobDropIndex, int mouseX, int mouseY) {
+    private void renderMobDropsView(GuiGraphics graphics, int currentDropIndex, int mouseX, int mouseY) {
         if (mobDrops.isEmpty()) {
             graphics.drawCenteredString(font, "No mob drops found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
             return;
         }
 
-        if (currentMobDropIndex >= mobDrops.size()) currentMobDropIndex = 0;
-        MobDropEntry drop = mobDrops.get(currentMobDropIndex);
+        if (currentDropIndex >= mobDrops.size()) currentDropIndex = 0;
+        MobDropEntry drop = mobDrops.get(currentDropIndex);
         int centerX = guiLeft + guiWidth / 2;
         int centerY = guiTop + 115;
 
-        String pageInfo = "Drop " + (currentMobDropIndex + 1) + " of " + mobDrops.size();
+        String pageInfo = "Mob Drop " + (currentDropIndex + 1) + " of " + mobDrops.size();
         graphics.drawCenteredString(font, pageInfo, guiLeft + guiWidth / 2, guiTop + 45, 0xFFFFFFFF);
 
-        // Mob Icon & Name
-        int mobX = centerX - 64;
-        drawSlot(graphics, mobX, centerY - 10);
-        graphics.renderItem(drop.getRepresentativeIcon(), mobX + 1, centerY - 9);
-        checkSlotHover(drop.getRepresentativeIcon(), mobX + 1, centerY - 9, mouseX, mouseY);
+        // Entity name
+        String entityName = drop.getMobName();
+        graphics.drawCenteredString(font, "Dropped by: " + entityName,
+                guiLeft + guiWidth / 2, guiTop + 58, 0xFFFF5555);
 
-        graphics.drawString(font, drop.getMobName(), centerX - 40, centerY - 18, 0xFFFFCC00);
-        graphics.drawString(font, "➔", centerX + 2, centerY - 6, 0xFFFFFFFF);
+        // Drop Icon & Arrow
+        int outX = centerX - 8;
+        int outY = centerY - 10;
+        drawSlot(graphics, outX, outY);
+        graphics.renderItem(drop.getDropItem(), outX + 1, outY + 1);
+        graphics.renderItemDecorations(font, drop.getDropItem(), outX + 1, outY + 1);
+        checkSlotHover(drop.getDropItem(), outX + 1, outY + 1, mouseX, mouseY);
 
-        // Drop Item Slot
-        int dropX = centerX + 30;
-        drawSlot(graphics, dropX, centerY - 10);
-        graphics.renderItem(drop.getDropItem(), dropX + 1, centerY - 9);
-        graphics.renderItemDecorations(font, drop.getDropItem(), dropX + 1, centerY - 9);
-        checkSlotHover(drop.getDropItem(), dropX + 1, centerY - 9, mouseX, mouseY);
-
-        graphics.drawCenteredString(font, "Chance: " + drop.getDropChance(), centerX, centerY + 26, 0xFFAAAAAA);
-    }
-
-    private void renderTreeView(GuiGraphics graphics, int mouseX, int mouseY) {
-        if (cachedTree == null) return;
-
-        int startX = guiLeft + 12;
-        int startY = guiTop + 65;
-
-        graphics.drawString(font, "Crafting Tree (Decomposition):", startX, startY, 0xFFFFAA00);
-
-        int lineY = startY + 14;
-        lineY = renderTreeNode(graphics, cachedTree, startX, lineY, 0, mouseX, mouseY);
-
-        int summaryY = guiTop + guiHeight - 48;
-        graphics.fill(guiLeft + 8, summaryY, guiLeft + guiWidth - 8, guiTop + guiHeight - 8, 0xFF2A2A35);
-        graphics.renderOutline(guiLeft + 8, summaryY, guiWidth - 16, 40, 0xFF4A4A5A);
-        graphics.drawString(font, "Total Raw Materials Needed:", guiLeft + 12, summaryY + 3, 0xFF55FF55);
-
-        Map<Item, Integer> raw = cachedTree.getRawMaterialsSummary();
-        int slotX = guiLeft + 12;
-        int slotY = summaryY + 16;
-
-        for (Map.Entry<Item, Integer> entry : raw.entrySet()) {
-            if (slotX + 18 > guiLeft + guiWidth - 12) break;
-
-            ItemStack rawStack = new ItemStack(entry.getKey(), entry.getValue());
-            drawSlot(graphics, slotX, slotY);
-            graphics.renderItem(rawStack, slotX + 1, slotY + 1);
-            graphics.renderItemDecorations(font, rawStack, slotX + 1, slotY + 1);
-            checkSlotHover(rawStack, slotX + 1, slotY + 1, mouseX, mouseY);
-
-            slotX += 20;
-        }
-    }
-
-    private int renderTreeNode(GuiGraphics graphics, CraftingTreeNode node, int x, int y, int depth, int mouseX, int mouseY) {
-        if (y > guiTop + guiHeight - 65) return y;
-
-        int indent = depth * 14;
-        String prefix = depth == 0 ? "● " : "↳ ";
-        graphics.drawString(font, prefix, x + indent, y + 2, 0xFFAAAAAA);
-
-        int itemX = x + indent + 12;
-        graphics.renderItem(node.getItem(), itemX, y - 2);
-        checkSlotHover(node.getItem(), itemX, y - 2, mouseX, mouseY);
-
-        String text = node.getItem().getHoverName().getString() + " x" + node.getCount();
-        if (node.isBaseMaterial()) {
-            text += " (Base)";
-        }
-        graphics.drawString(font, text, itemX + 18, y + 2, node.isBaseMaterial() ? 0xFF55FF55 : 0xFFFFFFFF);
-
-        y += 14;
-
-        for (CraftingTreeNode child : node.getChildren()) {
-            y = renderTreeNode(graphics, child, x, y, depth + 1, mouseX, mouseY);
-        }
-
-        return y;
+        String qtyInfo = "Drop Chance: " + drop.getDropChance();
+        graphics.drawCenteredString(font, qtyInfo, centerX, centerY + 24, 0xFFAAAAAA);
     }
 
     @SuppressWarnings("unchecked")
-    private <T> void renderCustomCategoryView(GuiGraphics graphics, IDexRecipeCategory<?> categoryRaw, int currentIdx, int mouseX, int mouseY) {
-        IDexRecipeCategory<T> category = (IDexRecipeCategory<T>) categoryRaw;
-        List<DexRegistriesImpl.CustomRecipeEntry> entries = customCategories.get(categoryRaw);
+    private <T> void renderCustomCategoryView(GuiGraphics graphics, IDexRecipeCategory<T> category, int currentIdx, int mouseX, int mouseY) {
+        List<DexRegistriesImpl.CustomRecipeEntry> entries = customCategories.get(category);
         if (entries == null || entries.isEmpty()) {
             graphics.drawCenteredString(font, "No custom machine recipes found.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
             return;
@@ -710,40 +755,101 @@ public class RecipeViewerScreen extends Screen {
         String pageInfo = "Recipe " + (currentIdx + 1) + " of " + entries.size();
         graphics.drawCenteredString(font, pageInfo, guiLeft + guiWidth / 2, guiTop + 45, 0xFFFFFFFF);
 
-        String title = category.getTitle() != null ? category.getTitle().getString() : category.getId().getPath();
-        graphics.drawCenteredString(font, title + " (" + category.getId().getNamespace() + ")",
-                guiLeft + guiWidth / 2, guiTop + 58, 0xFF88AAFF);
+        String catTitle = category.getTitle() != null ? category.getTitle().getString() : category.getId().getPath();
+        graphics.drawCenteredString(font, "Machine: " + catTitle, guiLeft + guiWidth / 2, guiTop + 58, 0xFFFFAA00);
 
-        int centerX = guiLeft + guiWidth / 2;
-        int centerY = guiTop + 115;
+        int recipeX = guiLeft + 20;
+        int recipeY = guiTop + 72;
+        int recipeWidth = guiWidth - 40;
+        int recipeHeight = 85;
 
-        // Draw custom background/category graphics
+        // Custom Category Background & Draw
+        graphics.fill(recipeX, recipeY, recipeX + recipeWidth, recipeY + recipeHeight, 0xFF22222A);
+        graphics.renderOutline(recipeX, recipeY, recipeWidth, recipeHeight, 0xFF444455);
+
         try {
             category.draw(recipe, graphics, mouseX, mouseY);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // Draw safely if third-party draw throws
         }
 
-        // Render slots
-        List<DexRecipeSlot> slots = entry.slots();
+        // Render Dynamic Captured Slots
+        List<DexRecipeSlot> slots = category.getSlots(recipe);
         if (slots != null && !slots.isEmpty()) {
-            // Calculate slot offset based on category display size
-            int offX = centerX - 60;
-            int offY = centerY - 30;
-
+            long time = System.currentTimeMillis() / 1000;
             for (DexRecipeSlot slot : slots) {
-                int sX = offX + slot.x();
-                int sY = offY + slot.y();
-                drawSlot(graphics, sX, sY);
+                int slotRenderX = recipeX + slot.x();
+                int slotRenderY = recipeY + slot.y();
+                drawSlot(graphics, slotRenderX, slotRenderY);
 
                 if (!slot.items().isEmpty()) {
-                    int cycleIdx = (int) ((System.currentTimeMillis() / 1000) % slot.items().size());
-                    ItemStack stack = slot.items().get(cycleIdx);
-                    graphics.renderItem(stack, sX + 1, sY + 1);
-                    graphics.renderItemDecorations(font, stack, sX + 1, sY + 1);
-                    checkSlotHover(stack, sX + 1, sY + 1, mouseX, mouseY);
+                    int itemIdx = (int) (time % slot.items().size());
+                    ItemStack stack = slot.items().get(itemIdx);
+                    if (!stack.isEmpty()) {
+                        graphics.renderItem(stack, slotRenderX + 1, slotRenderY + 1);
+                        graphics.renderItemDecorations(font, stack, slotRenderX + 1, slotRenderY + 1);
+                        checkSlotHover(stack, slotRenderX + 1, slotRenderY + 1, mouseX, mouseY);
+                    }
                 }
             }
         }
+    }
+
+    private void renderTreeView(GuiGraphics graphics, int mouseX, int mouseY) {
+        if (cachedTree == null) {
+            graphics.drawCenteredString(font, "No crafting tree available.", guiLeft + guiWidth / 2, guiTop + 90, 0xFFAAAAAA);
+            return;
+        }
+
+        int startX = guiLeft + 12;
+        int startY = guiTop + 64;
+
+        graphics.drawString(font, "Target: " + targetItem.getHoverName().getString() + " (x" + treeMultiplier + ")",
+                startX, startY, 0xFFFFAA00);
+
+        int curY = startY + 16;
+        curY = renderTreeNode(graphics, cachedTree, startX, curY, 0, mouseX, mouseY);
+
+        // Render Summary of Base Materials at bottom
+        curY += 6;
+        graphics.drawString(font, "Total Raw Materials Needed:", startX, curY, 0xFF55FF55);
+        curY += 12;
+
+        int matX = startX;
+        for (Map.Entry<Item, Integer> entry : cachedTree.getRawMaterialsSummary().entrySet()) {
+            ItemStack baseStack = new ItemStack(entry.getKey(), entry.getValue());
+            drawSlot(graphics, matX, curY);
+            graphics.renderItem(baseStack, matX + 1, curY + 1);
+            graphics.renderItemDecorations(font, baseStack, matX + 1, curY + 1);
+            checkSlotHover(baseStack, matX + 1, curY + 1, mouseX, mouseY);
+
+            matX += 20;
+            if (matX > guiLeft + guiWidth - 28) {
+                matX = startX;
+                curY += 20;
+            }
+        }
+    }
+
+    private int renderTreeNode(GuiGraphics graphics, CraftingTreeNode node, int x, int y, int depth, int mouseX, int mouseY) {
+        if (depth > 4 || y > guiTop + guiHeight - 50) return y;
+
+        int indent = depth * 14;
+        String prefix = depth == 0 ? "● " : "└─ ";
+        ItemStack stack = node.getItem();
+
+        graphics.drawString(font, prefix + stack.getHoverName().getString() + " x" + node.getCount(),
+                x + indent + 18, y + 4, node.isBaseMaterial() ? 0xFF55FF55 : 0xFFFFFFFF);
+
+        drawSlot(graphics, x + indent, y);
+        graphics.renderItem(stack, x + indent + 1, y + 1);
+        checkSlotHover(stack, x + indent + 1, y + 1, mouseX, mouseY);
+
+        y += 20;
+        for (CraftingTreeNode child : node.getChildren()) {
+            y = renderTreeNode(graphics, child, x, y, depth + 1, mouseX, mouseY);
+        }
+        return y;
     }
 
     private void drawSlot(GuiGraphics graphics, int x, int y) {
@@ -768,6 +874,19 @@ public class RecipeViewerScreen extends Screen {
         if (mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16) {
             this.hoveredSlotItem = stack;
         }
+    }
+
+    private static String formatTitle(String raw) {
+        if (raw == null || raw.isEmpty()) return "Recipe";
+        String cleaned = raw.replace('_', ' ').replace('/', ' ');
+        String[] words = cleaned.split("\\s+");
+        StringBuilder sb = new StringBuilder();
+        for (String w : words) {
+            if (!w.isEmpty()) {
+                sb.append(Character.toUpperCase(w.charAt(0))).append(w.substring(1)).append(" ");
+            }
+        }
+        return sb.toString().trim();
     }
 
     @Override
