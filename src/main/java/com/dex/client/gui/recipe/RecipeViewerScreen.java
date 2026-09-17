@@ -34,6 +34,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.*;
+import net.minecraft.world.level.block.Blocks;
 
 import java.util.*;
 
@@ -166,7 +167,7 @@ public class RecipeViewerScreen extends Screen {
 
         // 5. Crafting Tree Tab
         if (mode == Mode.CRAFTING && !allHolders.isEmpty()) {
-            tabs.add(new CategoryTab("tree", "🌳 Tree", new ItemStack(Items.OAK_SAPLING), 1, null));
+            tabs.add(new CategoryTab("tree", "Crafting Tree", new ItemStack(Items.OAK_SAPLING), 1, null));
         }
 
         // 6. Custom Machine & JEI Plugin Categories
@@ -180,7 +181,7 @@ public class RecipeViewerScreen extends Screen {
 
         // 7. Information & Guide Tab (Captured from JEI / DEX plugins)
         if (ItemInfoRegistry.getInstance().hasInfo(targetItem.getItem())) {
-            tabs.add(new CategoryTab("info", "ℹ Info", new ItemStack(Items.WRITABLE_BOOK), 1, null));
+            tabs.add(new CategoryTab("info", "Item Guide", new ItemStack(Items.WRITABLE_BOOK), 1, null));
         }
 
         if (activeTabIndex >= tabs.size()) {
@@ -252,30 +253,55 @@ public class RecipeViewerScreen extends Screen {
                     .bounds(guiLeft + 6, guiTop + 5, 44, 14).build());
         }
 
-        // 2. Category Tabs at Dedicated Row 2 (y = guiTop + 22)
+        // 2. Icon-Driven Category Tabs at Dedicated Row 2 (y = guiTop + 20)
         int tabX = guiLeft + 8;
-        int tabY = guiTop + 22;
-        int tabHeight = 16;
+        int tabY = guiTop + 20;
+        int tabWidth = 24;
+        int tabHeight = 20;
 
         for (int i = 0; i < tabs.size(); i++) {
             CategoryTab tab = tabs.get(i);
             int tabIndex = i;
             boolean isActive = (i == activeTabIndex);
-            int btnWidth = font.width(tab.label) + 10;
 
-            if (tabX + btnWidth > guiLeft + guiWidth - 6) {
+            if (tabX + tabWidth > guiLeft + guiWidth - 8) {
                 break; // Prevent overflowing screen width
             }
 
-            this.addRenderableWidget(Button.builder(
-                    Component.literal(tab.label).withStyle(isActive ? ChatFormatting.GOLD : ChatFormatting.GRAY),
-                    b -> {
-                        this.activeTabIndex = tabIndex;
-                        rebuildCategoryButtons();
-                    }
-            ).bounds(tabX, tabY, btnWidth, tabHeight).build());
+            Button tabButton = new Button(tabX, tabY, tabWidth, tabHeight, Component.literal(tab.label), b -> {
+                this.activeTabIndex = tabIndex;
+                rebuildCategoryButtons();
+            }, supplier -> supplier.get()) {
+                @Override
+                public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+                    int bx = getX();
+                    int by = getY();
+                    int bw = getWidth();
+                    int bh = getHeight();
 
-            tabX += btnWidth + 2;
+                    if (isActive) {
+                        // Elevated modern slate background + gold border + gold bottom line
+                        graphics.fill(bx, by, bx + bw, by + bh, 0xFF363646);
+                        graphics.renderOutline(bx, by, bw, bh, 0xFFFFAA00);
+                        graphics.fill(bx, by + bh - 2, bx + bw, by + bh, 0xFFFFAA00);
+                    } else {
+                        int bgColor = isHoveredOrFocused() ? 0xFF2E2E3C : 0xFF22222C;
+                        graphics.fill(bx, by, bx + bw, by + bh, bgColor);
+                        graphics.renderOutline(bx, by, bw, bh, isHoveredOrFocused() ? 0xFF666677 : 0xFF444455);
+                    }
+
+                    // Render centered 16x16 tab icon at bx + 4, by + 2
+                    if (!tab.icon.isEmpty()) {
+                        graphics.renderItem(tab.icon, bx + 4, by + 2);
+                    }
+                }
+            };
+
+            String countStr = tab.recipeCount > 1 ? " (" + tab.recipeCount + " recipes)" : (tab.recipeCount == 1 ? " (1 recipe)" : "");
+            tabButton.setTooltip(Tooltip.create(Component.literal(tab.label + countStr)));
+            this.addRenderableWidget(tabButton);
+
+            tabX += tabWidth + 2;
         }
 
         if (tabs.isEmpty()) return;
@@ -679,6 +705,21 @@ public class RecipeViewerScreen extends Screen {
                 }
             }
         }
+
+        // Dedicated Workstation / Catalyst Badge at bottom-left
+        ItemStack wsIcon = catInfo.icon();
+        if (!wsIcon.isEmpty()) {
+            int badgeX = guiLeft + 12;
+            int badgeY = guiTop + guiHeight - 24;
+            drawSlot(graphics, badgeX, badgeY);
+            graphics.renderItem(wsIcon, badgeX + 1, badgeY + 1);
+            graphics.renderItemDecorations(font, wsIcon, badgeX + 1, badgeY + 1);
+            checkSlotHover(wsIcon, badgeX + 1, badgeY + 1, mouseX, mouseY);
+
+            String stationName = wsIcon.getHoverName().getString();
+            String displayStation = font.plainSubstrByWidth("Station: " + stationName, guiWidth - 76);
+            graphics.drawString(font, displayStation, badgeX + 22, badgeY + 5, 0xFFAAAAAA);
+        }
     }
 
     private void renderBrewingView(GuiGraphics graphics, int currentBrewingIndex, int mouseX, int mouseY) {
@@ -723,6 +764,37 @@ public class RecipeViewerScreen extends Screen {
         checkSlotHover(entry.getOutput(), outX + 1, outY + 1, mouseX, mouseY);
 
         graphics.drawCenteredString(font, "Brewing Stand Recipe", centerX, centerY + 24, 0xFFAAAAAA);
+
+        // Dedicated Workstation / Catalyst Badge at bottom-left
+        int badgeX = guiLeft + 12;
+        int badgeY = guiTop + guiHeight - 24;
+        ItemStack wsIcon = new ItemStack(Items.BREWING_STAND);
+        drawSlot(graphics, badgeX, badgeY);
+        graphics.renderItem(wsIcon, badgeX + 1, badgeY + 1);
+        graphics.renderItemDecorations(font, wsIcon, badgeX + 1, badgeY + 1);
+        checkSlotHover(wsIcon, badgeX + 1, badgeY + 1, mouseX, mouseY);
+        graphics.drawString(font, "Station: Brewing Stand", badgeX + 22, badgeY + 5, 0xFFAAAAAA);
+    }
+
+    public static ItemStack getProfessionWorkstation(String profession) {
+        if (profession == null) return new ItemStack(Items.EMERALD);
+        String p = profession.toLowerCase(Locale.ROOT);
+        return switch (p) {
+            case "armorer" -> new ItemStack(Blocks.BLAST_FURNACE);
+            case "butcher" -> new ItemStack(Blocks.SMOKER);
+            case "cartographer" -> new ItemStack(Blocks.CARTOGRAPHY_TABLE);
+            case "cleric" -> new ItemStack(Blocks.BREWING_STAND);
+            case "farmer" -> new ItemStack(Blocks.COMPOSTER);
+            case "fisherman" -> new ItemStack(Blocks.BARREL);
+            case "fletcher" -> new ItemStack(Blocks.FLETCHING_TABLE);
+            case "leatherworker" -> new ItemStack(Blocks.CAULDRON);
+            case "librarian" -> new ItemStack(Blocks.LECTERN);
+            case "mason" -> new ItemStack(Blocks.STONECUTTER);
+            case "shepherd" -> new ItemStack(Blocks.LOOM);
+            case "toolsmith" -> new ItemStack(Blocks.SMITHING_TABLE);
+            case "weaponsmith" -> new ItemStack(Blocks.GRINDSTONE);
+            default -> new ItemStack(Items.EMERALD);
+        };
     }
 
     private void renderTradingView(GuiGraphics graphics, int currentTradeIndex, int mouseX, int mouseY) {
@@ -739,19 +811,32 @@ public class RecipeViewerScreen extends Screen {
         String pageInfo = "Trade " + (currentTradeIndex + 1) + " of " + villagerTrades.size();
         graphics.drawCenteredString(font, pageInfo, guiLeft + guiWidth / 2, guiTop + 45, 0xFFFFFFFF);
 
-        // Villager profession & level info
-        String profName = trade.getProfession() + " (" + trade.getLevelName() + " - Lvl " + trade.getLevel() + ")";
-        graphics.drawCenteredString(font, profName, guiLeft + guiWidth / 2, guiTop + 58, 0xFF55FF55);
+        // Villager profession & level info banner
+        String profTitle = formatTitle(trade.getProfession()) + " • " + trade.getLevelName() + " (Lvl " + trade.getLevel() + ")";
+        graphics.drawCenteredString(font, profTitle, guiLeft + guiWidth / 2, guiTop + 58, 0xFF55FF55);
 
-        // Cost A
-        int costAX = centerX - 60;
+        // 1. Workstation block slot on the left
+        int wsX = centerX - 82;
+        int wsY = centerY - 10;
+        ItemStack wsIcon = getProfessionWorkstation(trade.getProfession());
+        drawSlot(graphics, wsX, wsY);
+        graphics.renderItem(wsIcon, wsX + 1, wsY + 1);
+        graphics.renderItemDecorations(font, wsIcon, wsX + 1, wsY + 1);
+        checkSlotHover(wsIcon, wsX + 1, wsY + 1, mouseX, mouseY);
+        graphics.drawCenteredString(font, "Station", wsX + 9, wsY + 20, 0xFFAAAAAA);
+
+        // Separator
+        graphics.drawString(font, "│", centerX - 58, centerY - 6, 0xFF555566);
+
+        // 2. Cost A
+        int costAX = centerX - 48;
         drawSlot(graphics, costAX, centerY - 10);
         graphics.renderItem(trade.getCostA(), costAX + 1, centerY - 9);
         graphics.renderItemDecorations(font, trade.getCostA(), costAX + 1, centerY - 9);
         checkSlotHover(trade.getCostA(), costAX + 1, centerY - 9, mouseX, mouseY);
 
         // Cost B (Optional)
-        int costBX = centerX - 36;
+        int costBX = centerX - 26;
         if (!trade.getCostB().isEmpty()) {
             drawSlot(graphics, costBX, centerY - 10);
             graphics.renderItem(trade.getCostB(), costBX + 1, centerY - 9);
@@ -759,16 +844,17 @@ public class RecipeViewerScreen extends Screen {
             checkSlotHover(trade.getCostB(), costBX + 1, centerY - 9, mouseX, mouseY);
         }
 
-        graphics.drawString(font, "➔", centerX - 12, centerY - 6, 0xFFFFFFFF);
+        graphics.drawString(font, "➔", centerX - 4, centerY - 6, 0xFFFFAA00);
 
-        // Result Item
-        int outX = centerX + 20;
+        // 3. Result Item
+        int outX = centerX + 18;
         drawSlot(graphics, outX, centerY - 10);
         graphics.renderItem(trade.getResult(), outX + 1, centerY - 9);
         graphics.renderItemDecorations(font, trade.getResult(), outX + 1, centerY - 9);
         checkSlotHover(trade.getResult(), outX + 1, centerY - 9, mouseX, mouseY);
+        graphics.drawCenteredString(font, "Trade Result", outX + 9, centerY + 10, 0xFFAAAAAA);
 
-        graphics.drawCenteredString(font, "Villager Trade Offer", centerX, centerY + 24, 0xFFAAAAAA);
+        graphics.drawCenteredString(font, "Villager Profession Trade Offer", centerX, centerY + 28, 0xFF888899);
     }
 
     private void renderMobDropsView(GuiGraphics graphics, int currentDropIndex, int mouseX, int mouseY) {
@@ -785,21 +871,38 @@ public class RecipeViewerScreen extends Screen {
         String pageInfo = "Mob Drop " + (currentDropIndex + 1) + " of " + mobDrops.size();
         graphics.drawCenteredString(font, pageInfo, guiLeft + guiWidth / 2, guiTop + 45, 0xFFFFFFFF);
 
-        // Entity name
+        // Entity name banner
         String entityName = drop.getMobName();
-        graphics.drawCenteredString(font, "Dropped by: " + entityName,
-                guiLeft + guiWidth / 2, guiTop + 58, 0xFFFF5555);
+        graphics.drawCenteredString(font, "Source Entity: " + entityName,
+                guiLeft + guiWidth / 2, guiTop + 58, 0xFFFFAA00);
 
-        // Drop Icon & Arrow
-        int outX = centerX - 8;
+        // 1. Mob Source Slot (Spawn Egg or Mob Head)
+        int mobX = centerX - 56;
+        int mobY = centerY - 10;
+        drawSlot(graphics, mobX, mobY);
+        ItemStack mobIcon = drop.getRepresentativeIcon();
+        if (!mobIcon.isEmpty()) {
+            graphics.renderItem(mobIcon, mobX + 1, mobY + 1);
+            graphics.renderItemDecorations(font, mobIcon, mobX + 1, mobY + 1);
+            checkSlotHover(mobIcon, mobX + 1, mobY + 1, mouseX, mouseY);
+        }
+        graphics.drawCenteredString(font, "Mob", mobX + 9, mobY + 20, 0xFFAAAAAA);
+
+        // 2. Center Trajectory / Arrow with Drop Chance
+        graphics.drawString(font, "──🗡 Drop──➔", centerX - 26, centerY - 6, 0xFFFF5555);
+        String chanceInfo = "Chance: " + drop.getDropChance();
+        graphics.drawCenteredString(font, chanceInfo, centerX + 4, centerY + 8, 0xFFFFAA00);
+
+        // 3. Drop Result Slot
+        int outX = centerX + 38;
         int outY = centerY - 10;
         drawSlot(graphics, outX, outY);
         graphics.renderItem(drop.getDropItem(), outX + 1, outY + 1);
         graphics.renderItemDecorations(font, drop.getDropItem(), outX + 1, outY + 1);
         checkSlotHover(drop.getDropItem(), outX + 1, outY + 1, mouseX, mouseY);
+        graphics.drawCenteredString(font, "Drop Item", outX + 9, outY + 20, 0xFFAAAAAA);
 
-        String qtyInfo = "Drop Chance: " + drop.getDropChance();
-        graphics.drawCenteredString(font, qtyInfo, centerX, centerY + 24, 0xFFAAAAAA);
+        graphics.drawCenteredString(font, "Entity Drop Loot", centerX, centerY + 28, 0xFF888899);
     }
 
     @SuppressWarnings("unchecked")
@@ -854,6 +957,21 @@ public class RecipeViewerScreen extends Screen {
                     }
                 }
             }
+        }
+
+        // Dedicated Workstation / Catalyst Badge for Custom Machine at bottom-left
+        ItemStack wsIcon = category.getIcon();
+        if (wsIcon != null && !wsIcon.isEmpty()) {
+            int badgeX = guiLeft + 12;
+            int badgeY = guiTop + guiHeight - 24;
+            drawSlot(graphics, badgeX, badgeY);
+            graphics.renderItem(wsIcon, badgeX + 1, badgeY + 1);
+            graphics.renderItemDecorations(font, wsIcon, badgeX + 1, badgeY + 1);
+            checkSlotHover(wsIcon, badgeX + 1, badgeY + 1, mouseX, mouseY);
+
+            String stationName = wsIcon.getHoverName().getString();
+            String displayStation = font.plainSubstrByWidth("Machine: " + stationName, guiWidth - 76);
+            graphics.drawString(font, displayStation, badgeX + 22, badgeY + 5, 0xFFAAAAAA);
         }
     }
 
