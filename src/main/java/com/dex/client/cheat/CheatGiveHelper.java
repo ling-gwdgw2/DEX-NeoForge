@@ -9,14 +9,35 @@ import net.minecraft.world.item.ItemStack;
 
 /**
  * Handles giving items directly to the player in Creative or OP Cheat Mode.
+ * Protected: Non-operators in Survival mode cannot cheat items.
  */
 public final class CheatGiveHelper {
 
     private CheatGiveHelper() {}
 
+    /**
+     * Checks if the player currently has permission to cheat/give items.
+     * Allowed only if the player is in Creative Mode OR has operator permissions (permission level >= 2).
+     */
+    public static boolean canCheat() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return false;
+        return mc.player.isCreative() || mc.player.hasPermissions(2);
+    }
+
     public static void give(ItemStack stack, boolean fullStack) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || stack == null || stack.isEmpty()) return;
+
+        // Security check: Block non-operators in Survival mode from cheating items
+        if (!canCheat()) {
+            mc.player.displayClientMessage(
+                    Component.literal("DEX: Cheating items is disabled in Survival mode without Operator permissions!")
+                            .withStyle(ChatFormatting.RED),
+                    true
+            );
+            return;
+        }
 
         int count = fullStack ? stack.getMaxStackSize() : 1;
         ItemStack toGive = stack.copy();

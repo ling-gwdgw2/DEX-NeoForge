@@ -160,12 +160,20 @@ public class ItemGridOverlay {
         // 6. Render Cheat Mode Toggle Button (⚡)
         int cheatBtnX = x + width - 20;
         int cheatBtnY = y + height - 18;
-        boolean cheatActive = com.dex.client.config.DEXConfig.getInstance().isCheatMode();
+        boolean cheatPermitted = com.dex.client.cheat.CheatGiveHelper.canCheat();
+        boolean cheatActive = com.dex.client.config.DEXConfig.getInstance().isCheatMode() && cheatPermitted;
         boolean cheatHovered = mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16;
 
-        graphics.fill(cheatBtnX, cheatBtnY, cheatBtnX + 18, cheatBtnY + 16, cheatActive ? 0xD0442A00 : 0x80222228);
-        graphics.renderOutline(cheatBtnX, cheatBtnY, 18, 16, cheatActive ? 0xFFFFBB00 : (cheatHovered ? 0xFFFFFFFF : 0xFF555566));
-        graphics.drawCenteredString(font, "⚡", cheatBtnX + 9, cheatBtnY + 4, cheatActive ? 0xFFFFDD33 : (cheatHovered ? 0xFFE0E0E0 : 0xFF888899));
+        if (!cheatPermitted) {
+            // Locked appearance in Survival mode without OP
+            graphics.fill(cheatBtnX, cheatBtnY, cheatBtnX + 18, cheatBtnY + 16, 0x401A1A22);
+            graphics.renderOutline(cheatBtnX, cheatBtnY, 18, 16, 0x30555566);
+            graphics.drawCenteredString(font, "⚡", cheatBtnX + 9, cheatBtnY + 4, 0xFF555566);
+        } else {
+            graphics.fill(cheatBtnX, cheatBtnY, cheatBtnX + 18, cheatBtnY + 16, cheatActive ? 0xD0442A00 : 0x80222228);
+            graphics.renderOutline(cheatBtnX, cheatBtnY, 18, 16, cheatActive ? 0xFFFFBB00 : (cheatHovered ? 0xFFFFFFFF : 0xFF555566));
+            graphics.drawCenteredString(font, "⚡", cheatBtnX + 9, cheatBtnY + 4, cheatActive ? 0xFFFFDD33 : (cheatHovered ? 0xFFE0E0E0 : 0xFF888899));
+        }
     }
 
     public void renderTooltips(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -216,13 +224,22 @@ public class ItemGridOverlay {
             int cheatBtnX = x + width - 20;
             int cheatBtnY = y + height - 18;
             if (mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16) {
-                boolean cheatActive = com.dex.client.config.DEXConfig.getInstance().isCheatMode();
-                List<Component> cheatTooltips = List.of(
-                        Component.literal("Cheat Mode: " + (cheatActive ? "ON" : "OFF")).withStyle(cheatActive ? ChatFormatting.GOLD : ChatFormatting.GRAY),
-                        Component.literal("• Left-Click item: Give Max Stack").withStyle(ChatFormatting.DARK_GRAY),
-                        Component.literal("• Right-Click item: Give 1 Item").withStyle(ChatFormatting.DARK_GRAY),
-                        Component.literal("• Or hold Ctrl while clicking items").withStyle(ChatFormatting.DARK_GRAY)
-                );
+                boolean cheatPermitted = com.dex.client.cheat.CheatGiveHelper.canCheat();
+                boolean cheatActive = com.dex.client.config.DEXConfig.getInstance().isCheatMode() && cheatPermitted;
+                List<Component> cheatTooltips;
+                if (!cheatPermitted) {
+                    cheatTooltips = List.of(
+                            Component.literal("Cheat Mode: LOCKED").withStyle(ChatFormatting.RED),
+                            Component.literal("Disabled in Survival without Operator permissions (OP / Cheats Enabled).").withStyle(ChatFormatting.GRAY)
+                    );
+                } else {
+                    cheatTooltips = List.of(
+                            Component.literal("Cheat Mode: " + (cheatActive ? "ON" : "OFF")).withStyle(cheatActive ? ChatFormatting.GOLD : ChatFormatting.GRAY),
+                            Component.literal("• Left-Click item: Give Max Stack").withStyle(ChatFormatting.DARK_GRAY),
+                            Component.literal("• Right-Click item: Give 1 Item").withStyle(ChatFormatting.DARK_GRAY),
+                            Component.literal("• Or hold Ctrl while clicking items").withStyle(ChatFormatting.DARK_GRAY)
+                    );
+                }
                 graphics.renderComponentTooltip(Minecraft.getInstance().font, cheatTooltips, mouseX, mouseY);
             }
         }
@@ -290,9 +307,21 @@ public class ItemGridOverlay {
         int cheatBtnX = x + width - 20;
         int cheatBtnY = y + height - 18;
         if (mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16) {
+            Minecraft mc = Minecraft.getInstance();
+            if (!com.dex.client.cheat.CheatGiveHelper.canCheat()) {
+                DexSoundHelper.playButtonClick(0.6F);
+                if (mc.player != null) {
+                    mc.player.displayClientMessage(
+                            Component.literal("DEX: Cheat Mode requires Operator permissions (OP / Cheats Enabled) in Survival mode!")
+                                    .withStyle(ChatFormatting.RED),
+                            true
+                    );
+                }
+                return true;
+            }
+
             boolean active = com.dex.client.config.DEXConfig.getInstance().toggleCheatMode();
             DexSoundHelper.playButtonClick(active ? 1.2F : 0.8F);
-            Minecraft mc = Minecraft.getInstance();
             if (mc.player != null) {
                 mc.player.displayClientMessage(
                         Component.literal("DEX: Cheat Mode " + (active ? "ENABLED" : "DISABLED"))
@@ -305,7 +334,8 @@ public class ItemGridOverlay {
 
         // Item click
         if (!hoveredStack.isEmpty()) {
-            boolean isCheat = com.dex.client.config.DEXConfig.getInstance().isCheatMode() || net.minecraft.client.gui.screens.Screen.hasControlDown();
+            boolean isCheat = com.dex.client.cheat.CheatGiveHelper.canCheat() &&
+                    (com.dex.client.config.DEXConfig.getInstance().isCheatMode() || net.minecraft.client.gui.screens.Screen.hasControlDown());
             if (isCheat) {
                 if (button == 0) {
                     com.dex.client.cheat.CheatGiveHelper.give(hoveredStack, true);

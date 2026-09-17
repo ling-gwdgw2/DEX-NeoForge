@@ -49,23 +49,22 @@ public class BookmarkPanelOverlay {
 
         // Calculate container left edge safely
         int calculatedLeft = guiLeft > 0 ? guiLeft : ((screenWidth - Math.max(imageWidth, 176)) / 2);
-        int availableLeft = calculatedLeft - 6;
 
-        // Minimum required width is 26px for at least 1 column of 18px slots + 6px padding
-        if (availableLeft < 26) {
+        // Dock to the far left of the screen (6px margin)
+        this.x = 6;
+        int availableSpace = calculatedLeft - this.x - 6;
+
+        // Minimum required width is 26px for at least 1 column of 18px slots + 8px padding
+        if (availableSpace < 26) {
             this.active = false;
             return;
         }
 
-        this.columns = Math.max(1, Math.min(4, (availableLeft - 8) / SLOT_SIZE));
+        this.columns = Math.max(1, Math.min(4, (availableSpace - 8) / SLOT_SIZE));
         this.width = (this.columns * SLOT_SIZE) + 8;
-        this.x = calculatedLeft - this.width - 4;
 
-        this.y = Math.max(6, containerTop);
-        this.height = Math.max(containerHeight, 140);
-        if (this.y + this.height > screenHeight - 6) {
-            this.height = screenHeight - this.y - 6;
-        }
+        this.y = 6;
+        this.height = screenHeight - 12;
 
         int gridAvailableHeight = this.height - 24; // 24px reserved for header and margins
         this.rows = Math.max(1, gridAvailableHeight / SLOT_SIZE);
@@ -114,9 +113,7 @@ public class BookmarkPanelOverlay {
         int totalBookmarks = bookmarks.size();
         int totalPages = getTotalPages();
 
-        // 1. Sleek Modern Slate Background & Border
-        graphics.fill(x, y, x + width, y + height, 0xD014141C);
-        graphics.renderOutline(x, y, width, height, 0x60555566);
+        // 1. Transparent Panel Background (No solid slate box)
 
         // 2. Header Bar: Gold Star & Item Count
         if (columns >= 2) {
@@ -139,7 +136,7 @@ public class BookmarkPanelOverlay {
             graphics.drawString(font, ">", rightBtnX, pBtnY, currentPage < totalPages - 1 ? (rightHovered ? 0xFFFFAA00 : 0xFFFFFFFF) : 0xFF555566);
         }
 
-        // 3. Render Bookmarked Items Grid
+        // 3. Render Bookmarked Items Grid (Clean transparent floating items)
         int gridStartY = y + 18;
         int startIndex = currentPage * getPageSize();
 
@@ -148,12 +145,12 @@ public class BookmarkPanelOverlay {
                 int slotX = x + 4 + (c * SLOT_SIZE);
                 int slotY = gridStartY + (r * SLOT_SIZE);
 
-                // Slot Background & Outline
-                graphics.fill(slotX, slotY, slotX + 16, slotY + 16, 0x25FFFFFF);
-                graphics.renderOutline(slotX - 1, slotY - 1, 18, 18, 0x20888899);
-
                 int itemIndex = startIndex + (r * columns + c);
                 if (itemIndex < totalBookmarks) {
+                    // Subtle translucent slot backing
+                    graphics.fill(slotX, slotY, slotX + 16, slotY + 16, 0x1A000000);
+                    graphics.renderOutline(slotX - 1, slotY - 1, 18, 18, 0x25FFFFFF);
+
                     ItemStack stack = bookmarks.get(itemIndex);
                     graphics.renderItem(stack, slotX, slotY);
                     graphics.renderItemDecorations(font, stack, slotX, slotY);
@@ -197,7 +194,7 @@ public class BookmarkPanelOverlay {
             tooltips.add(Component.empty());
             tooltips.add(Component.literal("★ Bookmarked Item").withStyle(ChatFormatting.GOLD));
 
-            boolean isCheat = DEXConfig.get().isCheatMode() || Screen.hasControlDown();
+            boolean isCheat = CheatGiveHelper.canCheat() && (DEXConfig.get().isCheatMode() || Screen.hasControlDown());
             if (isCheat) {
                 tooltips.add(Component.literal("• Left-Click: Cheat 64").withStyle(ChatFormatting.DARK_GRAY));
                 tooltips.add(Component.literal("• Right-Click: Cheat 1").withStyle(ChatFormatting.DARK_GRAY));
@@ -260,7 +257,7 @@ public class BookmarkPanelOverlay {
                 return true;
             }
 
-            boolean isCheat = DEXConfig.get().isCheatMode() || Screen.hasControlDown();
+            boolean isCheat = CheatGiveHelper.canCheat() && (DEXConfig.get().isCheatMode() || Screen.hasControlDown());
             if (isCheat) {
                 if (button == 0) {
                     CheatGiveHelper.give(hoveredStack, true);
@@ -284,8 +281,7 @@ public class BookmarkPanelOverlay {
             }
         }
 
-        // Absorb any click inside panel so it doesn't accidentally click slots underneath
-        return true;
+        return false;
     }
 
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
@@ -298,13 +294,15 @@ public class BookmarkPanelOverlay {
         if (totalPages > 1) {
             if (scrollY < 0 && currentPage < totalPages - 1) {
                 currentPage++;
+                DexSoundHelper.playButtonClick();
                 return true;
             } else if (scrollY > 0 && currentPage > 0) {
                 currentPage--;
+                DexSoundHelper.playButtonClick();
                 return true;
             }
         }
 
-        return true;
+        return false;
     }
 }
