@@ -49,7 +49,7 @@ public class ItemGridOverlay {
 
         Font font = mc.font;
         int searchY = y + height - 18;
-        int searchWidth = width - 24;
+        int searchWidth = width - 38;
         this.searchBox = new EditBox(font, x + 2, searchY, searchWidth, 16, Component.literal("Search"));
         this.searchBox.setHint(Component.literal("Search... (@mod, #tag, -neg)").withStyle(ChatFormatting.DARK_GRAY));
         this.searchBox.setValue(currentText);
@@ -143,7 +143,20 @@ public class ItemGridOverlay {
             searchBox.render(graphics, mouseX, mouseY, partialTick);
         }
 
-        // 5. Render Cheat Mode Toggle Button (⚡)
+        // 5. Render Clear Search Button (✖)
+        int clearBtnX = x + width - 35;
+        int clearBtnY = y + height - 18;
+        int clearBtnWidth = 13;
+        int clearBtnHeight = 16;
+        boolean hasSearchText = searchBox != null && !searchBox.getValue().isEmpty();
+        if (hasSearchText) {
+            boolean clearHovered = mouseX >= clearBtnX && mouseX < clearBtnX + clearBtnWidth && mouseY >= clearBtnY && mouseY < clearBtnY + clearBtnHeight;
+            graphics.fill(clearBtnX, clearBtnY, clearBtnX + clearBtnWidth, clearBtnY + clearBtnHeight, clearHovered ? 0x80552222 : 0x5033333C);
+            graphics.renderOutline(clearBtnX, clearBtnY, clearBtnWidth, clearBtnHeight, clearHovered ? 0xFFFF5555 : 0xFF555566);
+            graphics.drawCenteredString(font, "✖", clearBtnX + clearBtnWidth / 2, clearBtnY + 4, clearHovered ? 0xFFFF7777 : 0xFFAAAAAA);
+        }
+
+        // 6. Render Cheat Mode Toggle Button (⚡)
         int cheatBtnX = x + width - 20;
         int cheatBtnY = y + height - 18;
         boolean cheatActive = com.dex.client.config.DEXConfig.getInstance().isCheatMode();
@@ -186,6 +199,18 @@ public class ItemGridOverlay {
 
             graphics.renderComponentTooltip(mc.font, tooltips, mouseX, mouseY);
         } else {
+            // Check hover on Clear Search button
+            int clearBtnX = x + width - 35;
+            int clearBtnY = y + height - 18;
+            boolean hasSearchText = searchBox != null && !searchBox.getValue().isEmpty();
+            if (hasSearchText && mouseX >= clearBtnX && mouseX < clearBtnX + 13 && mouseY >= clearBtnY && mouseY < clearBtnY + 16) {
+                List<Component> clearTooltips = List.of(
+                        Component.literal("Clear Search (✖)").withStyle(ChatFormatting.RED),
+                        Component.literal("Tip: Right-click inside search box to clear").withStyle(ChatFormatting.DARK_GRAY)
+                );
+                graphics.renderComponentTooltip(Minecraft.getInstance().font, clearTooltips, mouseX, mouseY);
+            }
+
             // Check hover on Cheat Mode button
             int cheatBtnX = x + width - 20;
             int cheatBtnY = y + height - 18;
@@ -203,6 +228,19 @@ public class ItemGridOverlay {
     }
 
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // Clear Search Button (✖) click
+        int clearBtnX = x + width - 35;
+        int clearBtnY = y + height - 18;
+        if (searchBox != null && !searchBox.getValue().isEmpty()) {
+            if (mouseX >= clearBtnX && mouseX < clearBtnX + 13 && mouseY >= clearBtnY && mouseY < clearBtnY + 16) {
+                searchBox.setValue("");
+                searchBox.setFocused(true);
+                ItemCatalogManager.getInstance().setSearchQuery("");
+                currentPage = 0;
+                return true;
+            }
+        }
+
         // Search box click handling
         if (searchBox != null) {
             boolean isInsideSearch = mouseX >= searchBox.getX() && mouseX < (searchBox.getX() + searchBox.getWidth())

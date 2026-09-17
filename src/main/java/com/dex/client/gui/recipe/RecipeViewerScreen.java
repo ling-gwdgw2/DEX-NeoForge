@@ -78,6 +78,7 @@ public class RecipeViewerScreen extends Screen {
 
     private final List<CategoryTab> tabs = new ArrayList<>();
     private int activeTabIndex = 0;
+    private int categoryTabOffset = 0;
     private final Map<String, Integer> tabRecipeIndices = new HashMap<>();
 
     // Tree calculator multiplier
@@ -253,20 +254,83 @@ public class RecipeViewerScreen extends Screen {
                     .bounds(guiLeft + 6, guiTop + 5, 44, 14).build());
         }
 
-        // 2. Icon-Driven Category Tabs at Dedicated Row 2 (y = guiTop + 20)
-        int tabX = guiLeft + 8;
+        // 2. Icon-Driven Category Tabs at Dedicated Row 2 (y = guiTop + 20) with Pagination
         int tabY = guiTop + 20;
         int tabWidth = 24;
         int tabHeight = 20;
 
-        for (int i = 0; i < tabs.size(); i++) {
+        boolean needsPagination = tabs.size() > 9;
+        int visibleTabCount = needsPagination ? 8 : 9;
+
+        // Keep activeTabIndex visible within the pagination window
+        if (activeTabIndex < categoryTabOffset) {
+            categoryTabOffset = activeTabIndex;
+        } else if (activeTabIndex >= categoryTabOffset + visibleTabCount) {
+            categoryTabOffset = activeTabIndex - visibleTabCount + 1;
+        }
+        categoryTabOffset = Math.max(0, Math.min(Math.max(0, tabs.size() - visibleTabCount), categoryTabOffset));
+
+        int tabStartX = guiLeft + 8;
+        if (needsPagination) {
+            tabStartX = guiLeft + 20; // Room for ◀ button
+
+            // Left pagination button ◀
+            boolean canScrollLeft = categoryTabOffset > 0;
+            Button leftPageBtn = new Button(guiLeft + 6, tabY, 12, tabHeight, Component.literal("◀"), b -> {
+                if (categoryTabOffset > 0) {
+                    categoryTabOffset--;
+                    rebuildCategoryButtons();
+                }
+            }, supplier -> supplier.get()) {
+                @Override
+                public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+                    int bx = getX();
+                    int by = getY();
+                    int bw = getWidth();
+                    int bh = getHeight();
+                    boolean hovered = isHoveredOrFocused() && canScrollLeft;
+                    graphics.fill(bx, by, bx + bw, by + bh, hovered ? 0xFF363646 : 0xFF22222C);
+                    graphics.renderOutline(bx, by, bw, bh, hovered ? 0xFF888899 : 0xFF444455);
+                    graphics.drawCenteredString(font, "◀", bx + bw / 2, by + 6, canScrollLeft ? (hovered ? 0xFFFFAA00 : 0xFFE0E0E0) : 0xFF555566);
+                }
+            };
+            leftPageBtn.active = canScrollLeft;
+            leftPageBtn.setTooltip(Tooltip.create(Component.literal("Previous Categories")));
+            this.addRenderableWidget(leftPageBtn);
+
+            // Right pagination button ▶
+            boolean canScrollRight = categoryTabOffset + visibleTabCount < tabs.size();
+            Button rightPageBtn = new Button(guiLeft + guiWidth - 18, tabY, 12, tabHeight, Component.literal("▶"), b -> {
+                if (categoryTabOffset + visibleTabCount < tabs.size()) {
+                    categoryTabOffset++;
+                    rebuildCategoryButtons();
+                }
+            }, supplier -> supplier.get()) {
+                @Override
+                public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+                    int bx = getX();
+                    int by = getY();
+                    int bw = getWidth();
+                    int bh = getHeight();
+                    boolean hovered = isHoveredOrFocused() && canScrollRight;
+                    graphics.fill(bx, by, bx + bw, by + bh, hovered ? 0xFF363646 : 0xFF22222C);
+                    graphics.renderOutline(bx, by, bw, bh, hovered ? 0xFF888899 : 0xFF444455);
+                    graphics.drawCenteredString(font, "▶", bx + bw / 2, by + 6, canScrollRight ? (hovered ? 0xFFFFAA00 : 0xFFE0E0E0) : 0xFF555566);
+                }
+            };
+            rightPageBtn.active = canScrollRight;
+            int remaining = Math.max(0, tabs.size() - (categoryTabOffset + visibleTabCount));
+            rightPageBtn.setTooltip(Tooltip.create(Component.literal(remaining > 0 ? "More Categories (" + remaining + ")" : "Next Categories")));
+            this.addRenderableWidget(rightPageBtn);
+        }
+
+        int tabX = tabStartX;
+        int endIndex = Math.min(tabs.size(), categoryTabOffset + visibleTabCount);
+
+        for (int i = categoryTabOffset; i < endIndex; i++) {
             CategoryTab tab = tabs.get(i);
             int tabIndex = i;
             boolean isActive = (i == activeTabIndex);
-
-            if (tabX + tabWidth > guiLeft + guiWidth - 8) {
-                break; // Prevent overflowing screen width
-            }
 
             Button tabButton = new Button(tabX, tabY, tabWidth, tabHeight, Component.literal(tab.label), b -> {
                 this.activeTabIndex = tabIndex;
@@ -315,6 +379,7 @@ public class RecipeViewerScreen extends Screen {
                 int cur = tabRecipeIndices.getOrDefault(currentTabId, 0);
                 if (cur > 0) {
                     tabRecipeIndices.put(currentTabId, cur - 1);
+                    if ("crafting".equals(currentTabId)) rebuildCategoryButtons();
                 }
             }).bounds(guiLeft + 8, guiTop + 42, 18, 16).build());
 
@@ -323,6 +388,7 @@ public class RecipeViewerScreen extends Screen {
                 int cur = tabRecipeIndices.getOrDefault(currentTabId, 0);
                 if (cur < currentTab.recipeCount - 1) {
                     tabRecipeIndices.put(currentTabId, cur + 1);
+                    if ("crafting".equals(currentTabId)) rebuildCategoryButtons();
                 }
             }).bounds(guiLeft + guiWidth - 26, guiTop + 42, 18, 16).build());
         }
@@ -1196,15 +1262,57 @@ public class RecipeViewerScreen extends Screen {
                 int cur = tabRecipeIndices.getOrDefault(activeTab.id, 0);
                 if (keyCode == 263 && cur > 0) { // Left arrow
                     tabRecipeIndices.put(activeTab.id, cur - 1);
+                    if ("crafting".equals(activeTab.id)) rebuildCategoryButtons();
                     return true;
                 } else if (keyCode == 262 && cur < activeTab.recipeCount - 1) { // Right arrow
                     tabRecipeIndices.put(activeTab.id, cur + 1);
+                    if ("crafting".equals(activeTab.id)) rebuildCategoryButtons();
                     return true;
                 }
             }
         }
 
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        // 1. Mouse wheel over category tab bar (guiTop + 18 to guiTop + 42)
+        if (mouseY >= guiTop + 18 && mouseY <= guiTop + 42 && mouseX >= guiLeft && mouseX <= guiLeft + guiWidth) {
+            int visibleCount = tabs.size() > 9 ? 8 : 9;
+            if (tabs.size() > visibleCount) {
+                if (scrollY < 0 && categoryTabOffset + visibleCount < tabs.size()) {
+                    categoryTabOffset++;
+                    rebuildCategoryButtons();
+                    return true;
+                } else if (scrollY > 0 && categoryTabOffset > 0) {
+                    categoryTabOffset--;
+                    rebuildCategoryButtons();
+                    return true;
+                }
+            }
+        }
+
+        // 2. Mouse wheel over main recipe content area (guiTop + 42 to guiTop + guiHeight)
+        if (mouseX >= guiLeft && mouseX <= guiLeft + guiWidth && mouseY >= guiTop + 42 && mouseY <= guiTop + guiHeight) {
+            if (!tabs.isEmpty()) {
+                CategoryTab currentTab = tabs.get(activeTabIndex);
+                if (!"tree".equals(currentTab.id) && !"info".equals(currentTab.id) && currentTab.recipeCount > 1) {
+                    int cur = tabRecipeIndices.getOrDefault(currentTab.id, 0);
+                    if (scrollY < 0 && cur < currentTab.recipeCount - 1) { // Scroll down = next recipe
+                        tabRecipeIndices.put(currentTab.id, cur + 1);
+                        if ("crafting".equals(currentTab.id)) rebuildCategoryButtons();
+                        return true;
+                    } else if (scrollY > 0 && cur > 0) { // Scroll up = previous recipe
+                        tabRecipeIndices.put(currentTab.id, cur - 1);
+                        if ("crafting".equals(currentTab.id)) rebuildCategoryButtons();
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
