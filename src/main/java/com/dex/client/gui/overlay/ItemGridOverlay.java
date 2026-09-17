@@ -3,6 +3,7 @@ package com.dex.client.gui.overlay;
 import com.dex.catalog.ItemCatalogManager;
 import com.dex.catalog.ModInfo;
 import com.dex.client.gui.recipe.RecipeViewerScreen;
+import com.dex.client.util.DexSoundHelper;
 import com.dex.recipe.RecipeIndexManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -237,6 +238,7 @@ public class ItemGridOverlay {
                 searchBox.setFocused(true);
                 ItemCatalogManager.getInstance().setSearchQuery("");
                 currentPage = 0;
+                DexSoundHelper.playButtonClick();
                 return true;
             }
         }
@@ -256,6 +258,7 @@ public class ItemGridOverlay {
                     searchBox.setFocused(true);
                     ItemCatalogManager.getInstance().setSearchQuery("");
                     currentPage = 0;
+                    DexSoundHelper.playButtonClick();
                     return true;
                 }
             } else {
@@ -271,11 +274,13 @@ public class ItemGridOverlay {
             if (mouseX >= x + 4 && mouseX < x + 16) {
                 if (currentPage > 0) {
                     currentPage--;
+                    DexSoundHelper.playButtonClick();
                     return true;
                 }
             } else if (mouseX >= (x + width - 16) && mouseX < (x + width - 4)) {
                 if (currentPage < getTotalPages() - 1) {
                     currentPage++;
+                    DexSoundHelper.playButtonClick();
                     return true;
                 }
             }
@@ -286,6 +291,7 @@ public class ItemGridOverlay {
         int cheatBtnY = y + height - 18;
         if (mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16) {
             boolean active = com.dex.client.config.DEXConfig.getInstance().toggleCheatMode();
+            DexSoundHelper.playButtonClick(active ? 1.2F : 0.8F);
             Minecraft mc = Minecraft.getInstance();
             if (mc.player != null) {
                 mc.player.displayClientMessage(
@@ -303,18 +309,22 @@ public class ItemGridOverlay {
             if (isCheat) {
                 if (button == 0) {
                     com.dex.client.cheat.CheatGiveHelper.give(hoveredStack, true);
+                    DexSoundHelper.playButtonClick();
                     return true;
                 } else if (button == 1) {
                     com.dex.client.cheat.CheatGiveHelper.give(hoveredStack, false);
+                    DexSoundHelper.playButtonClick();
                     return true;
                 }
             } else {
                 if (button == 0) {
                     // Left Click -> Recipes
+                    DexSoundHelper.playButtonClick();
                     RecipeViewerScreen.openRecipes(hoveredStack);
                     return true;
                 } else if (button == 1) {
                     // Right Click -> Usages
+                    DexSoundHelper.playButtonClick();
                     RecipeViewerScreen.openUsages(hoveredStack);
                     return true;
                 }

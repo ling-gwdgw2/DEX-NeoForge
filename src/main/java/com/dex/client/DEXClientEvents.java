@@ -4,9 +4,11 @@ import com.dex.DEXMod;
 import com.dex.catalog.ItemCatalogManager;
 import com.dex.catalog.ModInfo;
 import com.dex.client.bookmark.BookmarkManager;
+import com.dex.client.gui.overlay.BookmarkPanelOverlay;
 import com.dex.client.gui.overlay.ItemGridOverlay;
 import com.dex.client.gui.overlay.ModSidebarWidget;
 import com.dex.client.gui.recipe.RecipeViewerScreen;
+import com.dex.client.util.DexSoundHelper;
 import com.dex.plugin.DexPluginManager;
 import com.dex.recipe.RecipeIndexManager;
 import net.minecraft.ChatFormatting;
@@ -28,6 +30,7 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 public class DEXClientEvents {
+    private static final BookmarkPanelOverlay bookmarkPanel = new BookmarkPanelOverlay();
     private static final ModSidebarWidget modSidebar = new ModSidebarWidget();
     private static final ItemGridOverlay itemGrid = new ItemGridOverlay();
     private static boolean overlayActive = false;
@@ -128,6 +131,9 @@ public class DEXClientEvents {
 
         int availableWidth = screenWidth - containerRight - 6;
 
+        // Also update Left Bookmark Panel geometry
+        bookmarkPanel.updateBounds(mc, container, screenWidth, screenHeight);
+
         if (availableWidth >= 100) {
             overlayActive = true;
             int sidebarWidth = ModSidebarWidget.WIDTH;
@@ -170,30 +176,43 @@ public class DEXClientEvents {
 
         // Ensure bounds are updated to current container geometry every frame
         updateOverlayBounds(container, event.getScreen().width, event.getScreen().height);
-        if (!overlayActive) return;
 
         int mouseX = event.getMouseX();
         int mouseY = event.getMouseY();
         float partialTick = event.getPartialTick();
 
-        // 1. Render Mod Sidebar (Left of grid)
-        modSidebar.render(event.getGuiGraphics(), mouseX, mouseY, partialTick);
+        // 1. Render Left Bookmark Panel
+        bookmarkPanel.render(event.getGuiGraphics(), mouseX, mouseY, partialTick);
 
-        // 2. Render Item Grid
-        itemGrid.render(event.getGuiGraphics(), mouseX, mouseY, partialTick);
+        if (overlayActive) {
+            // 2. Render Mod Sidebar (Left of grid)
+            modSidebar.render(event.getGuiGraphics(), mouseX, mouseY, partialTick);
 
-        // 3. Render Tooltips on top
-        itemGrid.renderTooltips(event.getGuiGraphics(), mouseX, mouseY);
-        modSidebar.renderTooltips(event.getGuiGraphics(), mouseX, mouseY);
+            // 3. Render Item Grid
+            itemGrid.render(event.getGuiGraphics(), mouseX, mouseY, partialTick);
+
+            // 4. Render Tooltips on top
+            itemGrid.renderTooltips(event.getGuiGraphics(), mouseX, mouseY);
+            modSidebar.renderTooltips(event.getGuiGraphics(), mouseX, mouseY);
+        }
+
+        // Render Bookmark Tooltips at top layer
+        bookmarkPanel.renderTooltips(event.getGuiGraphics(), mouseX, mouseY);
     }
 
     @SubscribeEvent
     public static void onMouseClicked(ScreenEvent.MouseButtonPressed.Pre event) {
-        if (!overlayActive) return;
-
         double mouseX = event.getMouseX();
         double mouseY = event.getMouseY();
         int button = event.getButton();
+
+        // 1. Check Left Bookmark Panel
+        if (bookmarkPanel.mouseClicked(mouseX, mouseY, button)) {
+            event.setCanceled(true);
+            return;
+        }
+
+        if (!overlayActive) return;
 
         if (modSidebar.mouseClicked(mouseX, mouseY, button)) {
             event.setCanceled(true);
@@ -207,12 +226,18 @@ public class DEXClientEvents {
 
     @SubscribeEvent
     public static void onMouseScrolled(ScreenEvent.MouseScrolled.Pre event) {
-        if (!overlayActive) return;
-
         double mouseX = event.getMouseX();
         double mouseY = event.getMouseY();
         double scrollX = event.getScrollDeltaX();
         double scrollY = event.getScrollDeltaY();
+
+        // 1. Check Left Bookmark Panel
+        if (bookmarkPanel.mouseScrolled(mouseX, mouseY, scrollX, scrollY)) {
+            event.setCanceled(true);
+            return;
+        }
+
+        if (!overlayActive) return;
 
         if (modSidebar.mouseScrolled(mouseX, mouseY, scrollX, scrollY)) {
             event.setCanceled(true);
@@ -230,6 +255,7 @@ public class DEXClientEvents {
         if (event.getKeyCode() == 79 && (event.getModifiers() & 2) != 0) {
             overlayVisible = !overlayVisible;
             lastContainerRight = -1;
+            DexSoundHelper.playButtonClick();
             event.setCanceled(true);
             return;
         }
@@ -240,25 +266,57 @@ public class DEXClientEvents {
             return;
         }
 
-        // 2. Check hovered container/inventory slots for R (Recipes), U (Usages), and A (Bookmark)
+        // 2. Check if hovering over Left Bookmark Panel item
+        ItemStack bStack = bookmarkPanel.getHoveredStack();
+        if (bStack != null && !bStack.isEmpty()) {
+            if (event.getKeyCode() == 82) { // R
+                DexSoundHelper.playButtonClick();
+                RecipeViewerScreen.openRecipes(bStack);
+                event.setCanceled(true);
+                return;
+            } else if (event.getKeyCode() == 85) { // U
+                DexSoundHelper.playButtonClick();
+                RecipeViewerScreen.openUsages(bStack);
+                event.setCanceled(true);
+                return;
+            } else if (event.getKeyCode() == 65) { // A
+                boolean added = BookmarkManager.getInstance().toggleBookmark(bStack);
+                DexSoundHelper.playButtonClick(1.2F);
+                Minecraft mc = Minecraft.getInstance();
+                if (mc.player != null) {
+                    mc.player.displayClientMessage(
+                            Component.literal("DEX: " + (added ? "Pinned " : "Unpinned ") + bStack.getHoverName().getString() + " from Bookmarks!")
+                                    .withStyle(added ? ChatFormatting.GOLD : ChatFormatting.GRAY),
+                            true
+                    );
+                }
+                event.setCanceled(true);
+                return;
+            }
+        }
+
+        // 3. Check hovered container/inventory slots for R (Recipes), U (Usages), and A (Bookmark)
         if (event.getScreen() instanceof AbstractContainerScreen<?> container) {
             Slot slot = getHoveredSlot(container);
             if (slot != null && slot.hasItem()) {
                 ItemStack stack = slot.getItem();
                 if (event.getKeyCode() == 82) { // 'R' key
+                    DexSoundHelper.playButtonClick();
                     RecipeViewerScreen.openRecipes(stack);
                     event.setCanceled(true);
                     return;
                 } else if (event.getKeyCode() == 85) { // 'U' key
+                    DexSoundHelper.playButtonClick();
                     RecipeViewerScreen.openUsages(stack);
                     event.setCanceled(true);
                     return;
                 } else if (event.getKeyCode() == 65) { // 'A' key: Bookmark
                     boolean added = BookmarkManager.getInstance().toggleBookmark(stack);
+                    DexSoundHelper.playButtonClick(1.2F);
                     Minecraft mc = Minecraft.getInstance();
                     if (mc.player != null) {
                         mc.player.displayClientMessage(
-                                Component.literal("DEX: " + (added ? "Pinned " : "Unpinned ") + stack.getHoverName().getString() + " to Bookmarks!")
+                                Component.literal("DEX: " + (added ? "Pinned " : "Unpinned ") + stack.getHoverName().getString() + " from Bookmarks!")
                                         .withStyle(added ? ChatFormatting.GOLD : ChatFormatting.GRAY),
                                 true
                         );

@@ -6,6 +6,7 @@ import com.dex.catalog.ItemCatalogManager;
 import com.dex.catalog.ModInfo;
 import com.dex.client.bookmark.BookmarkManager;
 import com.dex.client.config.DEXConfig;
+import com.dex.client.util.DexSoundHelper;
 import com.dex.plugin.DexPluginManager;
 import com.dex.plugin.DexRegistriesImpl;
 import com.dex.recipe.RecipeIndexManager;
@@ -250,8 +251,10 @@ public class RecipeViewerScreen extends Screen {
 
         // 1. Back Button (Left side of Row 1)
         if (!HISTORY.isEmpty()) {
-            this.addRenderableWidget(Button.builder(Component.literal("⮌ Back"), b -> goBack())
-                    .bounds(guiLeft + 6, guiTop + 5, 44, 14).build());
+            this.addRenderableWidget(Button.builder(Component.literal("⮌ Back"), b -> {
+                DexSoundHelper.playButtonClick();
+                goBack();
+            }).bounds(guiLeft + 6, guiTop + 5, 44, 14).build());
         }
 
         // 2. Icon-Driven Category Tabs at Dedicated Row 2 (y = guiTop + 20) with Pagination
@@ -279,6 +282,7 @@ public class RecipeViewerScreen extends Screen {
             Button leftPageBtn = new Button(guiLeft + 6, tabY, 12, tabHeight, Component.literal("◀"), b -> {
                 if (categoryTabOffset > 0) {
                     categoryTabOffset--;
+                    DexSoundHelper.playButtonClick();
                     rebuildCategoryButtons();
                 }
             }, supplier -> supplier.get()) {
@@ -303,6 +307,7 @@ public class RecipeViewerScreen extends Screen {
             Button rightPageBtn = new Button(guiLeft + guiWidth - 18, tabY, 12, tabHeight, Component.literal("▶"), b -> {
                 if (categoryTabOffset + visibleTabCount < tabs.size()) {
                     categoryTabOffset++;
+                    DexSoundHelper.playButtonClick();
                     rebuildCategoryButtons();
                 }
             }, supplier -> supplier.get()) {
@@ -333,6 +338,7 @@ public class RecipeViewerScreen extends Screen {
             boolean isActive = (i == activeTabIndex);
 
             Button tabButton = new Button(tabX, tabY, tabWidth, tabHeight, Component.literal(tab.label), b -> {
+                DexSoundHelper.playButtonClick();
                 this.activeTabIndex = tabIndex;
                 rebuildCategoryButtons();
             }, supplier -> supplier.get()) {
@@ -378,6 +384,7 @@ public class RecipeViewerScreen extends Screen {
             this.addRenderableWidget(Button.builder(Component.literal("<"), b -> {
                 int cur = tabRecipeIndices.getOrDefault(currentTabId, 0);
                 if (cur > 0) {
+                    DexSoundHelper.playButtonClick();
                     tabRecipeIndices.put(currentTabId, cur - 1);
                     if ("crafting".equals(currentTabId)) rebuildCategoryButtons();
                 }
@@ -387,6 +394,7 @@ public class RecipeViewerScreen extends Screen {
             this.addRenderableWidget(Button.builder(Component.literal(">"), b -> {
                 int cur = tabRecipeIndices.getOrDefault(currentTabId, 0);
                 if (cur < currentTab.recipeCount - 1) {
+                    DexSoundHelper.playButtonClick();
                     tabRecipeIndices.put(currentTabId, cur + 1);
                     if ("crafting".equals(currentTabId)) rebuildCategoryButtons();
                 }
@@ -416,6 +424,7 @@ public class RecipeViewerScreen extends Screen {
             }
 
             Button.Builder plusBuilder = Button.builder(buttonText, b -> {
+                DexSoundHelper.playButtonClick();
                 transferRecipe();
             }).bounds(guiLeft + guiWidth - 26, guiTop + guiHeight - 24, 18, 16);
 
@@ -431,6 +440,7 @@ public class RecipeViewerScreen extends Screen {
                 this.addRenderableWidget(Button.builder(
                         Component.literal("x" + val).withStyle(isCur ? ChatFormatting.GOLD : ChatFormatting.WHITE),
                         b -> {
+                            DexSoundHelper.playButtonClick();
                             this.treeMultiplier = val;
                             this.cachedTree = CraftingTreeCalculator.calculateTree(targetItem, treeMultiplier);
                             rebuildCategoryButtons();
@@ -1209,9 +1219,11 @@ public class RecipeViewerScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!hoveredSlotItem.isEmpty()) {
             if (button == 0) {
+                DexSoundHelper.playButtonClick();
                 openRecipes(hoveredSlotItem);
                 return true;
             } else if (button == 1) {
+                DexSoundHelper.playButtonClick();
                 openUsages(hoveredSlotItem);
                 return true;
             }
@@ -1229,6 +1241,7 @@ public class RecipeViewerScreen extends Screen {
 
         // Backspace (keyCode 259): return to previous recipe in history
         if (keyCode == 259) {
+            DexSoundHelper.playButtonClick();
             goBack();
             return true;
         }
@@ -1236,13 +1249,16 @@ public class RecipeViewerScreen extends Screen {
         // Hovered Slot Shortcuts: R (Recipes), U (Usages), A (Pin to Bookmarks)
         if (!hoveredSlotItem.isEmpty()) {
             if (keyCode == 82) { // R
+                DexSoundHelper.playButtonClick();
                 openRecipes(hoveredSlotItem);
                 return true;
             } else if (keyCode == 85) { // U
+                DexSoundHelper.playButtonClick();
                 openUsages(hoveredSlotItem);
                 return true;
             } else if (keyCode == 65) { // A
                 boolean added = BookmarkManager.getInstance().toggleBookmark(hoveredSlotItem);
+                DexSoundHelper.playButtonClick(1.2F);
                 Minecraft mc = Minecraft.getInstance();
                 if (mc.player != null) {
                     mc.player.displayClientMessage(
@@ -1261,10 +1277,12 @@ public class RecipeViewerScreen extends Screen {
             if (activeTab.recipeCount > 1) {
                 int cur = tabRecipeIndices.getOrDefault(activeTab.id, 0);
                 if (keyCode == 263 && cur > 0) { // Left arrow
+                    DexSoundHelper.playButtonClick();
                     tabRecipeIndices.put(activeTab.id, cur - 1);
                     if ("crafting".equals(activeTab.id)) rebuildCategoryButtons();
                     return true;
                 } else if (keyCode == 262 && cur < activeTab.recipeCount - 1) { // Right arrow
+                    DexSoundHelper.playButtonClick();
                     tabRecipeIndices.put(activeTab.id, cur + 1);
                     if ("crafting".equals(activeTab.id)) rebuildCategoryButtons();
                     return true;
