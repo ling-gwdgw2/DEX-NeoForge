@@ -1,7 +1,6 @@
 package com.dex.client.gui.overlay;
 
 import com.dex.client.bookmark.BookmarkManager;
-import com.dex.client.cheat.CheatGiveHelper;
 import com.dex.client.config.DEXConfig;
 import com.dex.client.gui.recipe.RecipeViewerScreen;
 import com.dex.client.util.DexSoundHelper;
@@ -9,7 +8,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -19,7 +17,7 @@ import java.util.List;
 
 /**
  * Left Bookmark Panel Overlay rendered on the left side of container screens.
- * Displays pinned recipes/items with quick recipe lookup (R/U), cheat give, and middle-click unpinning.
+ * Displays pinned recipes/items with quick recipe lookup (R/U) and middle-click unpinning.
  */
 public class BookmarkPanelOverlay {
     public static final int SLOT_SIZE = 18;
@@ -193,15 +191,8 @@ public class BookmarkPanelOverlay {
 
             tooltips.add(Component.empty());
             tooltips.add(Component.literal("★ Bookmarked Item").withStyle(ChatFormatting.GOLD));
-
-            boolean isCheat = CheatGiveHelper.canCheat() && (DEXConfig.get().isCheatMode() || Screen.hasControlDown());
-            if (isCheat) {
-                tooltips.add(Component.literal("• Left-Click: Cheat 64").withStyle(ChatFormatting.DARK_GRAY));
-                tooltips.add(Component.literal("• Right-Click: Cheat 1").withStyle(ChatFormatting.DARK_GRAY));
-            } else {
-                tooltips.add(Component.literal("• Left-Click: Show Recipes (R)").withStyle(ChatFormatting.DARK_GRAY));
-                tooltips.add(Component.literal("• Right-Click: Show Usages (U)").withStyle(ChatFormatting.DARK_GRAY));
-            }
+            tooltips.add(Component.literal("• Left-Click: Show Recipes (R)").withStyle(ChatFormatting.DARK_GRAY));
+            tooltips.add(Component.literal("• Right-Click: Show Usages (U)").withStyle(ChatFormatting.DARK_GRAY));
             tooltips.add(Component.literal("• Middle-Click / 'A': Remove Bookmark").withStyle(ChatFormatting.RED));
 
             graphics.renderComponentTooltip(mc.font, tooltips, mouseX, mouseY);
@@ -257,27 +248,16 @@ public class BookmarkPanelOverlay {
                 return true;
             }
 
-            boolean isCheat = CheatGiveHelper.canCheat() && (DEXConfig.get().isCheatMode() || Screen.hasControlDown());
-            if (isCheat) {
-                if (button == 0) {
-                    CheatGiveHelper.give(hoveredStack, true);
-                    DexSoundHelper.playButtonClick();
-                    return true;
-                } else if (button == 1) {
-                    CheatGiveHelper.give(hoveredStack, false);
-                    DexSoundHelper.playButtonClick();
-                    return true;
-                }
-            } else {
-                if (button == 0) {
-                    DexSoundHelper.playButtonClick();
-                    RecipeViewerScreen.openRecipes(hoveredStack);
-                    return true;
-                } else if (button == 1) {
-                    DexSoundHelper.playButtonClick();
-                    RecipeViewerScreen.openUsages(hoveredStack);
-                    return true;
-                }
+            if (button == 0) {
+                // Left Click -> Recipes
+                DexSoundHelper.playButtonClick();
+                RecipeViewerScreen.openRecipes(hoveredStack);
+                return true;
+            } else if (button == 1) {
+                // Right Click -> Usages
+                DexSoundHelper.playButtonClick();
+                RecipeViewerScreen.openUsages(hoveredStack);
+                return true;
             }
         }
 

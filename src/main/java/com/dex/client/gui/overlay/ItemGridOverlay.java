@@ -50,7 +50,7 @@ public class ItemGridOverlay {
 
         Font font = mc.font;
         int searchY = y + height - 18;
-        int searchWidth = width - 38;
+        int searchWidth = width - 20;
         this.searchBox = new EditBox(font, x + 2, searchY, searchWidth, 16, Component.literal("Search"));
         this.searchBox.setHint(Component.literal("Search... (@mod, #tag, -neg)").withStyle(ChatFormatting.DARK_GRAY));
         this.searchBox.setValue(currentText);
@@ -145,9 +145,9 @@ public class ItemGridOverlay {
         }
 
         // 5. Render Clear Search Button (✖)
-        int clearBtnX = x + width - 35;
+        int clearBtnX = x + width - 18;
         int clearBtnY = y + height - 18;
-        int clearBtnWidth = 13;
+        int clearBtnWidth = 16;
         int clearBtnHeight = 16;
         boolean hasSearchText = searchBox != null && !searchBox.getValue().isEmpty();
         if (hasSearchText) {
@@ -155,24 +155,6 @@ public class ItemGridOverlay {
             graphics.fill(clearBtnX, clearBtnY, clearBtnX + clearBtnWidth, clearBtnY + clearBtnHeight, clearHovered ? 0x80552222 : 0x5033333C);
             graphics.renderOutline(clearBtnX, clearBtnY, clearBtnWidth, clearBtnHeight, clearHovered ? 0xFFFF5555 : 0xFF555566);
             graphics.drawCenteredString(font, "✖", clearBtnX + clearBtnWidth / 2, clearBtnY + 4, clearHovered ? 0xFFFF7777 : 0xFFAAAAAA);
-        }
-
-        // 6. Render Cheat Mode Toggle Button (⚡)
-        int cheatBtnX = x + width - 20;
-        int cheatBtnY = y + height - 18;
-        boolean cheatPermitted = com.dex.client.cheat.CheatGiveHelper.canCheat();
-        boolean cheatActive = com.dex.client.config.DEXConfig.getInstance().isCheatMode() && cheatPermitted;
-        boolean cheatHovered = mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16;
-
-        if (!cheatPermitted) {
-            // Locked appearance in Survival mode without OP
-            graphics.fill(cheatBtnX, cheatBtnY, cheatBtnX + 18, cheatBtnY + 16, 0x401A1A22);
-            graphics.renderOutline(cheatBtnX, cheatBtnY, 18, 16, 0x30555566);
-            graphics.drawCenteredString(font, "⚡", cheatBtnX + 9, cheatBtnY + 4, 0xFF555566);
-        } else {
-            graphics.fill(cheatBtnX, cheatBtnY, cheatBtnX + 18, cheatBtnY + 16, cheatActive ? 0xD0442A00 : 0x80222228);
-            graphics.renderOutline(cheatBtnX, cheatBtnY, 18, 16, cheatActive ? 0xFFFFBB00 : (cheatHovered ? 0xFFFFFFFF : 0xFF555566));
-            graphics.drawCenteredString(font, "⚡", cheatBtnX + 9, cheatBtnY + 4, cheatActive ? 0xFFFFDD33 : (cheatHovered ? 0xFFE0E0E0 : 0xFF888899));
         }
     }
 
@@ -209,48 +191,25 @@ public class ItemGridOverlay {
             graphics.renderComponentTooltip(mc.font, tooltips, mouseX, mouseY);
         } else {
             // Check hover on Clear Search button
-            int clearBtnX = x + width - 35;
+            int clearBtnX = x + width - 18;
             int clearBtnY = y + height - 18;
             boolean hasSearchText = searchBox != null && !searchBox.getValue().isEmpty();
-            if (hasSearchText && mouseX >= clearBtnX && mouseX < clearBtnX + 13 && mouseY >= clearBtnY && mouseY < clearBtnY + 16) {
+            if (hasSearchText && mouseX >= clearBtnX && mouseX < clearBtnX + 16 && mouseY >= clearBtnY && mouseY < clearBtnY + 16) {
                 List<Component> clearTooltips = List.of(
                         Component.literal("Clear Search (✖)").withStyle(ChatFormatting.RED),
                         Component.literal("Tip: Right-click inside search box to clear").withStyle(ChatFormatting.DARK_GRAY)
                 );
                 graphics.renderComponentTooltip(Minecraft.getInstance().font, clearTooltips, mouseX, mouseY);
             }
-
-            // Check hover on Cheat Mode button
-            int cheatBtnX = x + width - 20;
-            int cheatBtnY = y + height - 18;
-            if (mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16) {
-                boolean cheatPermitted = com.dex.client.cheat.CheatGiveHelper.canCheat();
-                boolean cheatActive = com.dex.client.config.DEXConfig.getInstance().isCheatMode() && cheatPermitted;
-                List<Component> cheatTooltips;
-                if (!cheatPermitted) {
-                    cheatTooltips = List.of(
-                            Component.literal("Cheat Mode: LOCKED").withStyle(ChatFormatting.RED),
-                            Component.literal("Disabled in Survival without Operator permissions (OP / Cheats Enabled).").withStyle(ChatFormatting.GRAY)
-                    );
-                } else {
-                    cheatTooltips = List.of(
-                            Component.literal("Cheat Mode: " + (cheatActive ? "ON" : "OFF")).withStyle(cheatActive ? ChatFormatting.GOLD : ChatFormatting.GRAY),
-                            Component.literal("• Left-Click item: Give Max Stack").withStyle(ChatFormatting.DARK_GRAY),
-                            Component.literal("• Right-Click item: Give 1 Item").withStyle(ChatFormatting.DARK_GRAY),
-                            Component.literal("• Or hold Ctrl while clicking items").withStyle(ChatFormatting.DARK_GRAY)
-                    );
-                }
-                graphics.renderComponentTooltip(Minecraft.getInstance().font, cheatTooltips, mouseX, mouseY);
-            }
         }
     }
 
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         // Clear Search Button (✖) click
-        int clearBtnX = x + width - 35;
+        int clearBtnX = x + width - 18;
         int clearBtnY = y + height - 18;
         if (searchBox != null && !searchBox.getValue().isEmpty()) {
-            if (mouseX >= clearBtnX && mouseX < clearBtnX + 13 && mouseY >= clearBtnY && mouseY < clearBtnY + 16) {
+            if (mouseX >= clearBtnX && mouseX < clearBtnX + 16 && mouseY >= clearBtnY && mouseY < clearBtnY + 16) {
                 searchBox.setValue("");
                 searchBox.setFocused(true);
                 ItemCatalogManager.getInstance().setSearchQuery("");
@@ -303,61 +262,18 @@ public class ItemGridOverlay {
             }
         }
 
-        // Cheat Mode Toggle button click
-        int cheatBtnX = x + width - 20;
-        int cheatBtnY = y + height - 18;
-        if (mouseX >= cheatBtnX && mouseX < cheatBtnX + 18 && mouseY >= cheatBtnY && mouseY < cheatBtnY + 16) {
-            Minecraft mc = Minecraft.getInstance();
-            if (!com.dex.client.cheat.CheatGiveHelper.canCheat()) {
-                DexSoundHelper.playButtonClick(0.6F);
-                if (mc.player != null) {
-                    mc.player.displayClientMessage(
-                            Component.literal("DEX: Cheat Mode requires Operator permissions (OP / Cheats Enabled) in Survival mode!")
-                                    .withStyle(ChatFormatting.RED),
-                            true
-                    );
-                }
-                return true;
-            }
-
-            boolean active = com.dex.client.config.DEXConfig.getInstance().toggleCheatMode();
-            DexSoundHelper.playButtonClick(active ? 1.2F : 0.8F);
-            if (mc.player != null) {
-                mc.player.displayClientMessage(
-                        Component.literal("DEX: Cheat Mode " + (active ? "ENABLED" : "DISABLED"))
-                                .withStyle(active ? ChatFormatting.GOLD : ChatFormatting.GRAY),
-                        true
-                );
-            }
-            return true;
-        }
-
         // Item click
         if (!hoveredStack.isEmpty()) {
-            boolean isCheat = com.dex.client.cheat.CheatGiveHelper.canCheat() &&
-                    (com.dex.client.config.DEXConfig.getInstance().isCheatMode() || net.minecraft.client.gui.screens.Screen.hasControlDown());
-            if (isCheat) {
-                if (button == 0) {
-                    com.dex.client.cheat.CheatGiveHelper.give(hoveredStack, true);
-                    DexSoundHelper.playButtonClick();
-                    return true;
-                } else if (button == 1) {
-                    com.dex.client.cheat.CheatGiveHelper.give(hoveredStack, false);
-                    DexSoundHelper.playButtonClick();
-                    return true;
-                }
-            } else {
-                if (button == 0) {
-                    // Left Click -> Recipes
-                    DexSoundHelper.playButtonClick();
-                    RecipeViewerScreen.openRecipes(hoveredStack);
-                    return true;
-                } else if (button == 1) {
-                    // Right Click -> Usages
-                    DexSoundHelper.playButtonClick();
-                    RecipeViewerScreen.openUsages(hoveredStack);
-                    return true;
-                }
+            if (button == 0) {
+                // Left Click -> Recipes
+                DexSoundHelper.playButtonClick();
+                RecipeViewerScreen.openRecipes(hoveredStack);
+                return true;
+            } else if (button == 1) {
+                // Right Click -> Usages
+                DexSoundHelper.playButtonClick();
+                RecipeViewerScreen.openUsages(hoveredStack);
+                return true;
             }
         }
 

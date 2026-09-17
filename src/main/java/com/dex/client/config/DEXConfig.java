@@ -18,7 +18,6 @@ public class DEXConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final File CONFIG_FILE = new File(Minecraft.getInstance().gameDirectory, "config/dex_client.json");
 
-    private boolean cheatMode = false;
     private boolean showLeftBookmarkPanel = true;
     private boolean showModTooltips = true;
     private boolean highlightMissingIngredients = true;
@@ -39,22 +38,6 @@ public class DEXConfig {
         load();
     }
 
-    public boolean isCheatMode() {
-        ensureLoaded();
-        return cheatMode;
-    }
-
-    public void setCheatMode(boolean cheatMode) {
-        this.cheatMode = cheatMode;
-        save();
-    }
-
-    public boolean toggleCheatMode() {
-        ensureLoaded();
-        this.cheatMode = !this.cheatMode;
-        save();
-        return this.cheatMode;
-    }
 
     public boolean isShowLeftBookmarkPanel() {
         ensureLoaded();
@@ -92,7 +75,6 @@ public class DEXConfig {
                 try (FileReader reader = new FileReader(CONFIG_FILE)) {
                     ConfigData data = GSON.fromJson(reader, ConfigData.class);
                     if (data != null) {
-                        this.cheatMode = data.cheatMode;
                         this.showLeftBookmarkPanel = data.showLeftBookmarkPanel;
                         this.showModTooltips = data.showModTooltips;
                         this.highlightMissingIngredients = data.highlightMissingIngredients;
@@ -112,7 +94,6 @@ public class DEXConfig {
             }
             try (FileWriter writer = new FileWriter(CONFIG_FILE)) {
                 ConfigData data = new ConfigData(
-                        this.cheatMode,
                         this.showLeftBookmarkPanel,
                         this.showModTooltips,
                         this.highlightMissingIngredients
@@ -125,13 +106,11 @@ public class DEXConfig {
     }
 
     private static class ConfigData {
-        boolean cheatMode;
         boolean showLeftBookmarkPanel;
         boolean showModTooltips;
         boolean highlightMissingIngredients;
 
-        ConfigData(boolean cheatMode, boolean showLeftBookmarkPanel, boolean showModTooltips, boolean highlightMissingIngredients) {
-            this.cheatMode = cheatMode;
+        ConfigData(boolean showLeftBookmarkPanel, boolean showModTooltips, boolean highlightMissingIngredients) {
             this.showLeftBookmarkPanel = showLeftBookmarkPanel;
             this.showModTooltips = showModTooltips;
             this.highlightMissingIngredients = highlightMissingIngredients;
