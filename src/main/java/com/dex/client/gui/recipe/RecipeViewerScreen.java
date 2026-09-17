@@ -387,15 +387,30 @@ public class RecipeViewerScreen extends Screen {
     }
 
     @Override
+    public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        // No-op: Prevent vanilla Screen#renderBackground from invoking renderBlurredBackground(partialTick),
+        // which runs Minecraft's post-processing blur shader and blurs the screen/GUI.
+    }
+
+    @Override
+    protected void renderBlurredBackground(float partialTick) {
+        // No-op: Disable the blur shader effect in RecipeViewerScreen to ensure 100% crisp and sharp rendering.
+    }
+
+    @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         hoveredSlotItem = ItemStack.EMPTY;
         hoveredSlotIsMissing = false;
 
-        // 1. Background Box (Dark Modern Slate Glassmorphism)
+        // 1. Transparent background dimming over the game world (identical to AbstractContainerScreen)
+        // Dims the world cleanly without applying any post-processing blur shader, keeping the GUI crystal clear
+        this.renderTransparentBackground(graphics);
+
+        // 2. Background Box (Dark Modern Slate Glassmorphism)
         graphics.fill(guiLeft, guiTop, guiLeft + guiWidth, guiTop + guiHeight, 0xF018181E);
         graphics.renderOutline(guiLeft, guiTop, guiWidth, guiHeight, 0xFF4A4A5A);
 
-        // 2. Header Title (Safe Layout - Never Overlaps Back Button)
+        // 3. Header Title (Safe Layout - Never Overlaps Back Button)
         String prefix = (mode == Mode.CRAFTING ? "Recipe: " : "Usages: ");
         String fullTitle = prefix + targetItem.getHoverName().getString();
 
