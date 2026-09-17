@@ -716,7 +716,7 @@ public class RecipeViewerScreen extends Screen {
             graphics.renderItemDecorations(font, wsIcon, badgeX + 1, badgeY + 1);
             checkSlotHover(wsIcon, badgeX + 1, badgeY + 1, mouseX, mouseY);
 
-            String stationName = wsIcon.getHoverName().getString();
+            String stationName = (catInfo != null && catInfo.title() != null) ? catInfo.title().getString() : wsIcon.getHoverName().getString();
             String displayStation = font.plainSubstrByWidth("Station: " + stationName, guiWidth - 76);
             graphics.drawString(font, displayStation, badgeX + 22, badgeY + 5, 0xFFAAAAAA);
         }

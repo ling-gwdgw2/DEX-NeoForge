@@ -4,6 +4,7 @@ import net.minecraft.core.NonNullList;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.*;
@@ -51,6 +52,8 @@ public final class RecipeIngredientHelper {
                             result.add(ing);
                         }
                     }
+                    // Also extract tool ingredient if present in modded recipes (e.g. Farmer's Delight CuttingBoardRecipe)
+                    extractToolIfPresent(recipe, result);
                     if (!result.isEmpty()) return result;
                 }
             }
@@ -69,7 +72,33 @@ public final class RecipeIngredientHelper {
         }
 
         // 4. Cached reflection inspection for any other recipe
-        return findIngredientsViaReflection(recipe);
+        List<Ingredient> reflected = findIngredientsViaReflection(recipe);
+        extractToolIfPresent(recipe, reflected);
+        return reflected;
+    }
+
+    private static void extractToolIfPresent(Recipe<?> recipe, List<Ingredient> result) {
+        if (recipe == null) return;
+        Class<?> clazz = recipe.getClass();
+        try {
+            Method m = clazz.getMethod("getTool");
+            Object val = m.invoke(recipe);
+            if (val instanceof Ingredient toolIng && !toolIng.isEmpty() && !result.contains(toolIng)) {
+                result.add(toolIng);
+                return;
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            Field f = getField(clazz, "tool");
+            if (f != null) {
+                f.setAccessible(true);
+                Object val = f.get(recipe);
+                if (val instanceof Ingredient toolIng && !toolIng.isEmpty() && !result.contains(toolIng)) {
+                    result.add(toolIng);
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static List<Ingredient> extractFieldsDirectly(Object target, String... fieldNames) {
@@ -141,8 +170,8 @@ public final class RecipeIngredientHelper {
                         if (ing != null && !ing.isEmpty()) ingredients.add(ing);
                     }
                 } else if (val instanceof Collection<?> col) {
-                    for (Object elem : col) {
-                        if (elem instanceof Ingredient ing && !ing.isEmpty()) {
+                    for (Object obj : col) {
+                        if (obj instanceof Ingredient ing && !ing.isEmpty()) {
                             ingredients.add(ing);
                         }
                     }
@@ -239,8 +268,8 @@ public final class RecipeIngredientHelper {
             return new RecipeCategoryInfo("smithing", Component.literal("Smithing"), new ItemStack(Blocks.SMITHING_TABLE), WorkstationKind.SMITHING_TABLE);
         }
 
-        // 4. Stonecutter
-        if (recipe instanceof StonecutterRecipe || recipe.getType() == RecipeType.STONECUTTING) {
+        // 4. Stonecutter (ONLY for actual vanilla Stonecutter recipe types)
+        if (recipe.getType() == RecipeType.STONECUTTING) {
             return new RecipeCategoryInfo("stonecutting", Component.literal("Stonecutting"), new ItemStack(Blocks.STONECUTTER), WorkstationKind.STONECUTTER);
         }
 
@@ -249,19 +278,144 @@ public final class RecipeIngredientHelper {
             return new RecipeCategoryInfo("weapon_fusion", Component.literal("Weapon Fusion"), new ItemStack(Blocks.ANVIL), WorkstationKind.FUSION_ANVIL);
         }
 
-        // 6. Registered RecipeType Fallback
+        // 6. Registered RecipeType Fallback (Intelligent multi-tier resolution)
         try {
             ResourceLocation typeId = BuiltInRegistries.RECIPE_TYPE.getKey(recipe.getType());
             if (typeId != null && !typeId.equals(ResourceLocation.fromNamespaceAndPath("minecraft", "crafting"))) {
-                String typePath = typeId.getPath();
-                String displayName = formatTitle(typePath);
-                ItemStack icon = guessIcon(typePath);
-                WorkstationKind kind = typePath.contains("anvil") ? WorkstationKind.FUSION_ANVIL : WorkstationKind.GENERIC;
-                return new RecipeCategoryInfo(typeId.toString(), Component.literal(displayName), icon, kind);
+                WorkstationResolution res = resolveWorkstationInfo(typeId, recipe, id);
+                return new RecipeCategoryInfo(res.categoryId(), Component.literal(res.title()), res.icon(), res.kind());
             }
         } catch (Throwable ignored) {}
 
         return new RecipeCategoryInfo("crafting", Component.literal("Crafting"), new ItemStack(Items.CRAFTING_TABLE), WorkstationKind.CRAFTING_TABLE);
+    }
+
+    public record WorkstationResolution(String categoryId, String title, ItemStack icon, WorkstationKind kind) {}
+
+    public static WorkstationResolution resolveWorkstationInfo(ResourceLocation typeId, Recipe<?> recipe, ResourceLocation recipeId) {
+        String namespace = typeId.getNamespace();
+        String typePath = typeId.getPath().toLowerCase(Locale.ROOT);
+        String recipePath = recipeId != null ? recipeId.getPath().toLowerCase(Locale.ROOT) : "";
+
+        // 1. Check if DexRegistries / JEI imported catalysts has this type
+        try {
+            List<ItemStack> catalysts = com.dex.plugin.DexPluginManager.getInstance().getRegistries().getWorkstations(typeId);
+            if (catalysts != null && !catalysts.isEmpty()) {
+                ItemStack cat = catalysts.get(0);
+                if (cat != null && !cat.isEmpty()) {
+                    String title = cat.getHoverName().getString();
+                    return new WorkstationResolution(typeId.toString(), title, cat.copy(), WorkstationKind.GENERIC);
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        // 2. Farmer's Delight specific detection (Cutting Board & Cooking Pot)
+        if ("farmersdelight".equals(namespace) || recipe.getClass().getName().contains("farmersdelight") || recipePath.contains("salvaging")) {
+            if (typePath.contains("cut") || recipePath.contains("salvaging") || recipe.getClass().getSimpleName().contains("Cutting")) {
+                Item cuttingBoard = BuiltInRegistries.ITEM.get(ResourceLocation.fromNamespaceAndPath("farmersdelight", "cutting_board"));
+                ItemStack icon = (cuttingBoard != null && cuttingBoard != Items.AIR) ?
+                        new ItemStack(cuttingBoard) : new ItemStack(Blocks.OAK_PLANKS);
+                return new WorkstationResolution("farmersdelight:cutting", "Cutting Board", icon, WorkstationKind.GENERIC);
+            }
+            if (typePath.contains("cook") || recipe.getClass().getSimpleName().contains("Cooking")) {
+                Item pot = BuiltInRegistries.ITEM.get(ResourceLocation.fromNamespaceAndPath("farmersdelight", "cooking_pot"));
+                ItemStack icon = (pot != null && pot != Items.AIR) ?
+                        new ItemStack(pot) : new ItemStack(Blocks.CAULDRON);
+                return new WorkstationResolution("farmersdelight:cooking", "Cooking Pot", icon, WorkstationKind.GENERIC);
+            }
+        }
+
+        // 3. Check exact Item with same ID in BuiltInRegistries.ITEM
+        // e.g. "corail_woodcutter:woodcutter" for "corail_woodcutter:woodcutting"
+        Item directItem = BuiltInRegistries.ITEM.get(typeId);
+        if (directItem != null && directItem != Items.AIR) {
+            return new WorkstationResolution(typeId.toString(), directItem.getName(new ItemStack(directItem)).getString(),
+                    new ItemStack(directItem), WorkstationKind.GENERIC);
+        }
+
+        // 4. Check matching block/item in the same mod namespace
+        for (Map.Entry<net.minecraft.resources.ResourceKey<Item>, Item> entry : BuiltInRegistries.ITEM.entrySet()) {
+            ResourceLocation itemKey = entry.getKey().location();
+            if (itemKey.getNamespace().equals(namespace)) {
+                String itemPath = itemKey.getPath();
+                if (typePath.contains("cut") && itemPath.contains("cutting_board")) {
+                    return new WorkstationResolution(typeId.toString(), "Cutting Board", new ItemStack(entry.getValue()), WorkstationKind.GENERIC);
+                }
+                if ((typePath.contains("woodcut") || itemPath.contains("woodcutter")) && itemPath.contains("cutter")) {
+                    return new WorkstationResolution(typeId.toString(), "Woodcutter", new ItemStack(entry.getValue()), WorkstationKind.GENERIC);
+                }
+                if (typePath.contains("saw") && (itemPath.contains("saw") || itemPath.contains("sawmill"))) {
+                    return new WorkstationResolution(typeId.toString(), "Sawmill", new ItemStack(entry.getValue()), WorkstationKind.GENERIC);
+                }
+                if (typePath.contains("crush") && (itemPath.contains("crusher") || itemPath.contains("crushing_wheel") || itemPath.contains("mill"))) {
+                    return new WorkstationResolution(typeId.toString(), "Crusher", new ItemStack(entry.getValue()), WorkstationKind.GENERIC);
+                }
+                if (typePath.contains("press") && (itemPath.contains("press") || itemPath.contains("compactor"))) {
+                    return new WorkstationResolution(typeId.toString(), "Mechanical Press", new ItemStack(entry.getValue()), WorkstationKind.GENERIC);
+                }
+                if (typePath.contains("brew") && (itemPath.contains("brew") || itemPath.contains("kettle") || itemPath.contains("vat"))) {
+                    return new WorkstationResolution(typeId.toString(), "Brewing Vat", new ItemStack(entry.getValue()), WorkstationKind.GENERIC);
+                }
+            }
+        }
+
+        // 5. Intelligent Fallback by keywords (DO NOT default to Stonecutter for "cut"!)
+        String title = formatTitle(typePath);
+        ItemStack icon;
+        WorkstationKind kind = WorkstationKind.GENERIC;
+
+        if (typePath.contains("stonecut")) {
+            icon = new ItemStack(Blocks.STONECUTTER);
+            title = "Stonecutting";
+            kind = WorkstationKind.STONECUTTER;
+        } else if (typePath.contains("woodcut")) {
+            icon = new ItemStack(Items.IRON_AXE);
+            title = "Woodcutting";
+        } else if (typePath.contains("cut")) {
+            Item knife = BuiltInRegistries.ITEM.get(ResourceLocation.fromNamespaceAndPath("farmersdelight", "flint_knife"));
+            if (knife != null && knife != Items.AIR) {
+                icon = new ItemStack(knife);
+            } else {
+                icon = new ItemStack(Items.SHEARS);
+            }
+            title = "Cutting";
+        } else if (typePath.contains("saw")) {
+            icon = new ItemStack(Items.IRON_AXE);
+            title = "Sawing";
+        } else if (typePath.contains("smelt") || typePath.contains("furnace")) {
+            icon = new ItemStack(Blocks.FURNACE);
+            title = "Smelting";
+            kind = WorkstationKind.FURNACE;
+        } else if (typePath.contains("blast")) {
+            icon = new ItemStack(Blocks.BLAST_FURNACE);
+            title = "Blasting";
+            kind = WorkstationKind.FURNACE;
+        } else if (typePath.contains("smoke")) {
+            icon = new ItemStack(Blocks.SMOKER);
+            title = "Smoking";
+            kind = WorkstationKind.FURNACE;
+        } else if (typePath.contains("anvil") || typePath.contains("fusion")) {
+            icon = new ItemStack(Blocks.ANVIL);
+            title = "Anvil / Fusion";
+            kind = WorkstationKind.FUSION_ANVIL;
+        } else if (typePath.contains("smithing")) {
+            icon = new ItemStack(Blocks.SMITHING_TABLE);
+            title = "Smithing";
+            kind = WorkstationKind.SMITHING_TABLE;
+        } else if (typePath.contains("brew") || typePath.contains("potion")) {
+            icon = new ItemStack(Blocks.BREWING_STAND);
+            title = "Brewing";
+        } else if (typePath.contains("enchant")) {
+            icon = new ItemStack(Blocks.ENCHANTING_TABLE);
+            title = "Enchanting";
+        } else if (typePath.contains("crush") || typePath.contains("press") || typePath.contains("mill")) {
+            icon = new ItemStack(Blocks.PISTON);
+            title = "Processing";
+        } else {
+            icon = new ItemStack(Items.CRAFTING_TABLE);
+        }
+
+        return new WorkstationResolution(typeId.toString(), title, icon, kind);
     }
 
     private static String formatTitle(String raw) {
@@ -275,17 +429,5 @@ public final class RecipeIngredientHelper {
             }
         }
         return sb.toString().trim();
-    }
-
-    private static ItemStack guessIcon(String path) {
-        String lower = path.toLowerCase(Locale.ROOT);
-        if (lower.contains("anvil") || lower.contains("fusion")) return new ItemStack(Blocks.ANVIL);
-        if (lower.contains("furnace") || lower.contains("smelt")) return new ItemStack(Blocks.FURNACE);
-        if (lower.contains("smithing")) return new ItemStack(Blocks.SMITHING_TABLE);
-        if (lower.contains("crush") || lower.contains("press") || lower.contains("mill")) return new ItemStack(Blocks.PISTON);
-        if (lower.contains("brew") || lower.contains("potion")) return new ItemStack(Blocks.BREWING_STAND);
-        if (lower.contains("saw") || lower.contains("cut")) return new ItemStack(Blocks.STONECUTTER);
-        if (lower.contains("enchant") || lower.contains("altar") || lower.contains("infus")) return new ItemStack(Blocks.ENCHANTING_TABLE);
-        return new ItemStack(Items.CRAFTING_TABLE);
     }
 }
