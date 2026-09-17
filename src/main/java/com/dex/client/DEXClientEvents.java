@@ -4,6 +4,7 @@ import com.dex.DEXMod;
 import com.dex.catalog.ItemCatalogManager;
 import com.dex.catalog.ModInfo;
 import com.dex.client.bookmark.BookmarkManager;
+import com.dex.client.ghost.GhostRecipeManager;
 import com.dex.client.gui.overlay.BookmarkPanelOverlay;
 import com.dex.client.gui.overlay.ItemGridOverlay;
 import com.dex.client.gui.overlay.ModSidebarWidget;
@@ -17,6 +18,8 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.inventory.CraftingMenu;
+import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -164,6 +167,11 @@ public class DEXClientEvents {
             lastContainerRight = -1; // Force layout recalculation
             itemGrid.unfocusSearch();
             updateOverlayBounds(container, event.getScreen().width, event.getScreen().height);
+
+            // Clear ghost recipe if not a crafting container
+            if (!(container.getMenu() instanceof CraftingMenu || container.getMenu() instanceof InventoryMenu)) {
+                GhostRecipeManager.getInstance().clear();
+            }
         } else {
             itemGrid.unfocusSearch();
             overlayActive = false;
@@ -184,20 +192,26 @@ public class DEXClientEvents {
         // 1. Render Left Bookmark Panel
         bookmarkPanel.render(event.getGuiGraphics(), mouseX, mouseY, partialTick);
 
+        // 2. Render Ghost Recipe Items & Highlights onto Crafting Container
+        GhostRecipeManager.getInstance().renderGhostSlots(event.getGuiGraphics(), container, mouseX, mouseY);
+
         if (overlayActive) {
-            // 2. Render Mod Sidebar (Left of grid)
+            // 3. Render Mod Sidebar (Left of grid)
             modSidebar.render(event.getGuiGraphics(), mouseX, mouseY, partialTick);
 
-            // 3. Render Item Grid
+            // 4. Render Item Grid
             itemGrid.render(event.getGuiGraphics(), mouseX, mouseY, partialTick);
 
-            // 4. Render Tooltips on top
+            // 5. Render Tooltips on top
             itemGrid.renderTooltips(event.getGuiGraphics(), mouseX, mouseY);
             modSidebar.renderTooltips(event.getGuiGraphics(), mouseX, mouseY);
         }
 
         // Render Bookmark Tooltips at top layer
         bookmarkPanel.renderTooltips(event.getGuiGraphics(), mouseX, mouseY);
+
+        // Render Ghost Recipe Tooltip if hovered
+        GhostRecipeManager.getInstance().renderTooltip(event.getGuiGraphics(), container, mouseX, mouseY);
     }
 
     @SubscribeEvent
@@ -210,6 +224,16 @@ public class DEXClientEvents {
         if (bookmarkPanel.mouseClicked(mouseX, mouseY, button)) {
             event.setCanceled(true);
             return;
+        }
+
+        // 2. Check Ghost Recipe Slot Interactions (click result or right-click to dismiss)
+        if (GhostRecipeManager.getInstance().hasGhostRecipe()) {
+            if (event.getScreen() instanceof AbstractContainerScreen<?> container) {
+                Slot slot = getHoveredSlot(container);
+                if (slot != null) {
+                    GhostRecipeManager.getInstance().onSlotClicked(slot, button);
+                }
+            }
         }
 
         if (!overlayActive) return;

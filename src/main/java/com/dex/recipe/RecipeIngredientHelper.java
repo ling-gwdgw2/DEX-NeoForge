@@ -27,6 +27,20 @@ public final class RecipeIngredientHelper {
     private RecipeIngredientHelper() {}
 
     /**
+     * Extracts ingredients preserving grid positions and blanks for ShapedRecipe,
+     * while returning filtered list for other recipes.
+     */
+    public static List<Ingredient> getRawIngredients(Recipe<?> recipe) {
+        if (recipe instanceof ShapedRecipe shaped) {
+            NonNullList<Ingredient> ingredients = shaped.getIngredients();
+            if (ingredients != null && !ingredients.isEmpty()) {
+                return new ArrayList<>(ingredients);
+            }
+        }
+        return getIngredients(recipe);
+    }
+
+    /**
      * Extracts all ingredients from any Recipe instance.
      * Guarantees retrieval for Smithing recipes (which return empty NonNullList in 1.21.1)
      * and modded recipes (such as Cataclysm WeaponfusionRecipe) that do not override getIngredients().

@@ -39,7 +39,7 @@ public final class RecipeTransferHelper {
             return new InventoryCheckResult(true, Collections.emptySet(), Collections.emptyMap());
         }
 
-        List<Ingredient> ingredients = RecipeIngredientHelper.getIngredients(recipe);
+        List<Ingredient> ingredients = RecipeIngredientHelper.getRawIngredients(recipe);
         if (ingredients.isEmpty()) {
             return new InventoryCheckResult(true, Collections.emptySet(), Collections.emptyMap());
         }

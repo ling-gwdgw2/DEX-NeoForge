@@ -6,6 +6,7 @@ import com.dex.catalog.ItemCatalogManager;
 import com.dex.catalog.ModInfo;
 import com.dex.client.bookmark.BookmarkManager;
 import com.dex.client.config.DEXConfig;
+import com.dex.client.ghost.GhostRecipeManager;
 import com.dex.client.util.DexSoundHelper;
 import com.dex.plugin.DexPluginManager;
 import com.dex.plugin.DexRegistriesImpl;
@@ -93,6 +94,10 @@ public class RecipeViewerScreen extends Screen {
 
     private ItemStack hoveredSlotItem = ItemStack.EMPTY;
     private boolean hoveredSlotIsMissing = false;
+    private Button plusButton = null;
+
+    private static final ResourceLocation LIT_PROGRESS_SPRITE = ResourceLocation.withDefaultNamespace("container/furnace/lit_progress");
+    private static final ResourceLocation BURN_PROGRESS_SPRITE = ResourceLocation.withDefaultNamespace("container/furnace/burn_progress");
 
     public RecipeViewerScreen(Screen previousScreen, ItemStack targetItem, Mode mode) {
         super(Component.literal(mode == Mode.CRAFTING ? "Recipe Viewer" : "Usage Viewer"));
@@ -402,6 +407,7 @@ public class RecipeViewerScreen extends Screen {
         }
 
         // 4. Auto-transfer '+' button (for crafting table recipes)
+        this.plusButton = null;
         if ("crafting".equals(currentTabId) && recipesByCategory.containsKey("crafting") && !recipesByCategory.get("crafting").isEmpty()) {
             int cur = tabRecipeIndices.getOrDefault("crafting", 0);
             List<RecipeHolder<?>> craftingList = recipesByCategory.get("crafting");
@@ -420,7 +426,7 @@ public class RecipeViewerScreen extends Screen {
                     tooltipSb.append("- ").append(new ItemStack(entry.getKey()).getHoverName().getString())
                             .append(" x").append(entry.getValue()).append("\n");
                 }
-                tooltipSb.append("[Click] to try transfer anyway");
+                tooltipSb.append("\n[Click] Place Ghost Items on Crafting Table");
             }
 
             Button.Builder plusBuilder = Button.builder(buttonText, b -> {
@@ -429,7 +435,8 @@ public class RecipeViewerScreen extends Screen {
             }).bounds(guiLeft + guiWidth - 26, guiTop + guiHeight - 24, 18, 16);
 
             plusBuilder.tooltip(Tooltip.create(Component.literal(tooltipSb.toString().trim())));
-            this.addRenderableWidget(plusBuilder.build());
+            this.plusButton = plusBuilder.build();
+            this.addRenderableWidget(this.plusButton);
         } else if ("tree".equals(currentTabId)) {
             // Multiplier buttons for tree calculator: [x1] [x4] [x16] [x64]
             int multX = guiLeft + 8;
@@ -459,7 +466,25 @@ public class RecipeViewerScreen extends Screen {
         if (cur < 0 || cur >= craftingList.size()) cur = 0;
         RecipeHolder<?> holder = craftingList.get(cur);
 
-        RecipeTransferHelper.executeTransfer(holder, previousScreen);
+        RecipeTransferHelper.InventoryCheckResult check = RecipeTransferHelper.checkInventory(holder.value());
+        Minecraft mc = Minecraft.getInstance();
+        if (check.allPresent()) {
+            GhostRecipeManager.getInstance().clear();
+            RecipeTransferHelper.executeTransfer(holder, previousScreen);
+        } else {
+            // Some or all ingredients are missing: set persistent Ghost Recipe on Crafting Table!
+            GhostRecipeManager.getInstance().setGhostRecipe(holder, check);
+            if (previousScreen != null) {
+                mc.setScreen(previousScreen);
+            }
+            if (mc.player != null) {
+                mc.player.displayClientMessage(
+                        Component.literal("DEX: Ghost Recipe placed on Crafting Table! (Missing items highlighted in red)")
+                                .withStyle(ChatFormatting.GOLD),
+                        true
+                );
+            }
+        }
     }
 
     @Override
@@ -577,7 +602,7 @@ public class RecipeViewerScreen extends Screen {
             output = targetItem.copy();
         }
 
-        List<Ingredient> ingredients = RecipeIngredientHelper.getIngredients(recipe);
+        List<Ingredient> ingredients = RecipeIngredientHelper.getRawIngredients(recipe);
         RecipeIngredientHelper.RecipeCategoryInfo catInfo = RecipeIngredientHelper.getCategoryInfo(holder);
         RecipeTransferHelper.InventoryCheckResult check = DEXConfig.get().isHighlightMissingIngredients() ?
                 RecipeTransferHelper.checkInventory(recipe) : null;
@@ -594,21 +619,35 @@ public class RecipeViewerScreen extends Screen {
                 height = shaped.getHeight();
             }
 
-            int ingIdx = 0;
+            boolean isPlusHovered = plusButton != null && plusButton.isHovered();
+
             for (int r = 0; r < height; r++) {
                 for (int c = 0; c < width; c++) {
                     int slotX = gridLeft + (c * 18);
                     int slotY = gridTop + (r * 18);
                     drawSlot(graphics, slotX, slotY);
 
+                    int ingIdx = (recipe instanceof ShapedRecipe shaped) ? (r * shaped.getWidth() + c) : (r * 3 + c);
                     if (ingIdx < ingredients.size()) {
                         Ingredient ing = ingredients.get(ingIdx);
-                        boolean isMissing = check != null && check.missingSlotIndices().contains(ingIdx);
-                        renderIngredient(graphics, ing, slotX + 1, slotY + 1, mouseX, mouseY, isMissing);
-                        if (isMissing) {
-                            graphics.fill(slotX + 1, slotY + 1, slotX + 17, slotY + 17, 0x55FF3333);
+                        if (ing != null && !ing.isEmpty()) {
+                            boolean isMissing = check != null && check.missingSlotIndices().contains(ingIdx);
+                            renderIngredient(graphics, ing, slotX + 1, slotY + 1, mouseX, mouseY, isMissing);
+
+                            if (isPlusHovered) {
+                                if (isMissing) {
+                                    // High-visibility glowing red for missing ingredients on plus hover
+                                    graphics.fill(slotX + 1, slotY + 1, slotX + 17, slotY + 17, 0x66FF2222);
+                                    graphics.renderOutline(slotX, slotY, 18, 18, 0xFFFF3333);
+                                } else {
+                                    // High-visibility glowing emerald for available ingredients on plus hover
+                                    graphics.fill(slotX + 1, slotY + 1, slotX + 17, slotY + 17, 0x4433FF33);
+                                    graphics.renderOutline(slotX, slotY, 18, 18, 0xFF33FF33);
+                                }
+                            } else if (isMissing) {
+                                graphics.fill(slotX + 1, slotY + 1, slotX + 17, slotY + 17, 0x55FF3333);
+                            }
                         }
-                        ingIdx++;
                     }
                 }
             }
@@ -637,8 +676,31 @@ public class RecipeViewerScreen extends Screen {
                 }
             }
 
-            graphics.drawString(font, "♨", centerX - 20, centerY - 6, 0xFFFF5555);
-            graphics.drawString(font, "➔", centerX - 4, centerY - 6, 0xFFFFFFFF);
+            // 1. Animated Smelting Flame (14x14)
+            int flameX = centerX - 24;
+            int flameY = centerY - 7;
+            graphics.fill(flameX - 1, flameY - 1, flameX + 15, flameY + 15, 0x40000000);
+            graphics.renderOutline(flameX - 1, flameY - 1, 16, 16, 0x30FFFFFF);
+
+            // 1.2s smooth burning loop
+            float flameProgress = 1.0f - ((System.currentTimeMillis() % 1200L) / 1200.0f);
+            int litHeight = Math.max(1, (int) (flameProgress * 14.0f));
+            if (litHeight > 0) {
+                graphics.blitSprite(LIT_PROGRESS_SPRITE, 14, 14, 0, 14 - litHeight, flameX, flameY + 14 - litHeight, 14, litHeight);
+            }
+
+            // 2. Animated Cooking Progress Bar Arrow (24x16)
+            int arrowX = centerX - 4;
+            int arrowY = centerY - 8;
+            graphics.fill(arrowX - 1, arrowY - 1, arrowX + 25, arrowY + 17, 0x40000000);
+            graphics.renderOutline(arrowX - 1, arrowY - 1, 26, 18, 0x30FFFFFF);
+
+            // 2.4s smooth cooking progress loop
+            float cookProgress = (System.currentTimeMillis() % 2400L) / 2400.0f;
+            int arrowWidth = Math.max(0, (int) (cookProgress * 24.0f));
+            if (arrowWidth > 0) {
+                graphics.blitSprite(BURN_PROGRESS_SPRITE, 24, 16, 0, 0, arrowX, arrowY, arrowWidth, 16);
+            }
 
             int outX = centerX + 24;
             int outY = centerY - 10;
